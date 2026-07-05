@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Any
 from enum import StrEnum
 
 
@@ -42,7 +43,7 @@ class ArchitectOutput(BaseModel):
     widget_type: WidgetType
     brand: BrandExtraction
     logic: MathLogic
-    copywriting: dict[str, str]
+    copywriting: dict[str, Any]
 
 
 class DesignTokens(BaseModel):
@@ -55,9 +56,15 @@ class DeploymentResult(BaseModel):
     widget_id: str
 
 
+class ProjectFile(BaseModel):
+    path: str
+    content: str
+
+
 class WidgetCode(BaseModel):
-    source_code: str
+    files: list[ProjectFile]
     design_tokens: DesignTokens
+    entry_point: str = "src/App.jsx"
 
 
 class PipelineStatus(BaseModel):

@@ -67,7 +67,7 @@ uv run alembic upgrade head
 ## Stack
 
 - **Backend:** Python 3.13, FastAPI, SQLAlchemy (async), Alembic, PostgreSQL
-- **AI:** Google Antigravity SDK, Gemini 2.5, Stitch MCP
+- **AI:** Google Antigravity SDK, Gemini 3.1, Stitch MCP
 - **Payments:** Stripe Checkout + Webhooks
 - **Frontend:** Next.js, TypeScript, Tailwind CSS, pnpm
 - **Tooling:** uv, ruff, mypy, pytest

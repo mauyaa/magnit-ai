@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.platform.config.settings import settings
 from app.platform.db.base import Base
+import app.platform.db.models  # noqa: F401 — ensure all models are loaded
 
 config = context.config
 if config.config_file_name is not None:

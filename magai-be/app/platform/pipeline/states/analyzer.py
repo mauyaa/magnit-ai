@@ -1,8 +1,10 @@
+import json
 import logging
+import re
 
 from google.antigravity.types import CapabilitiesConfig, BuiltinTools
 
-from app.platform.pipeline.schemas import BlueprintList
+from app.platform.pipeline.schemas import Blueprint, BlueprintList
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,8 @@ Each blueprint must include:
 - description: What it does and how it works
 - rationale: Why this specific type will convert for this specific business
 
-Return your analysis as structured output matching the BlueprintList schema."""
+Return ONLY valid JSON matching this structure, no other text:
+{"blueprints": [{"type": "...", "title": "...", "description": "...", "rationale": "..."}]}"""
 
 
 def analyzer_capabilities() -> CapabilitiesConfig:
@@ -36,8 +39,18 @@ async def run(agent, url: str) -> BlueprintList:
     prompt = (
         f"Visit {url} and analyze the business model, target audience, "
         f"and value proposition. Then propose 3 interactive lead magnet "
-        f"widgets that would generate qualified leads for this business."
+        f"widgets that would generate qualified leads for this business. "
+        f"Return ONLY valid JSON."
     )
     response = await agent.chat(prompt)
     data = await response.structured_output()
-    return BlueprintList(**data)
+    if data is not None:
+        return BlueprintList(**data)
+
+    text = await response.text()
+    logger.info("Analyzer: parsing text response (structured_output unavailable)")
+    json_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if json_match:
+        parsed = json.loads(json_match.group())
+        return BlueprintList(**parsed)
+    raise ValueError(f"Could not parse blueprints from response: {text[:500]}")
