@@ -11,7 +11,8 @@ export type MagnitaiSection =
   | "analytics"
   | "design-system"
   | "checkout"
-  | "build-story";
+  | "build-story"
+  | "dashboard";
 
 interface NavigationProps {
   activeSection: MagnitaiSection;
@@ -64,10 +65,10 @@ export function Navigation({ activeSection }: NavigationProps) {
 
         <div className="flex items-center gap-2">
           <Link
-            to="/build"
+            to="/dashboard"
             className="hidden h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5 active:scale-[0.97] active:translate-y-0 sm:flex"
           >
-            Build a widget <ArrowUpRight className="size-4" />
+            Dashboard <ArrowUpRight className="size-4" />
           </Link>
           <button
             type="button"
@@ -106,11 +107,11 @@ export function Navigation({ activeSection }: NavigationProps) {
               </Link>
             ))}
             <Link
-              to="/build"
+              to="/dashboard"
               onClick={() => setMenuOpen(false)}
               className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Build a widget <ArrowUpRight className="size-4" />
+              Dashboard <ArrowUpRight className="size-4" />
             </Link>
           </motion.nav>
         )}

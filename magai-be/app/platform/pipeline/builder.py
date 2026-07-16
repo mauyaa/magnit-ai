@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -141,29 +143,49 @@ async def _run_build(project_dir: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _copy_without_node_modules(src: str, dst: str) -> None:
+    os.makedirs(dst, exist_ok=True)
+    for item in os.listdir(src):
+        src_path = os.path.join(src, item)
+        if item == "node_modules":
+            continue
+        dst_path = os.path.join(dst, item)
+        if os.path.isdir(src_path):
+            shutil.copytree(src_path, dst_path, ignore=shutil.ignored_patterns("node_modules"), dirs_exist_ok=True)
+        else:
+            shutil.copy2(src_path, dst_path)
+
+
 async def build_project(
     project_dir: str, files: list[dict], max_retries: int = 3, gen_callback=None
 ) -> tuple[bool, str]:
-    _scaffold_project(project_dir, files)
+    sandbox = tempfile.mkdtemp(prefix="magai-sandbox-")
 
-    for attempt in range(max_retries):
-        success, output = await _run_build(project_dir)
-        if success:
-            dist = f"{project_dir}/dist"
-            if os.path.exists(f"{dist}/assets"):
-                logger.info("Build succeeded on attempt %d/%d", attempt + 1, max_retries)
+    try:
+        _scaffold_project(sandbox, files)
+
+        for attempt in range(max_retries):
+            success, output = await _run_build(sandbox)
+            if success:
+                dist = f"{sandbox}/dist"
+                if os.path.exists(f"{dist}/assets"):
+                    logger.info("Build succeeded on attempt %d/%d", attempt + 1, max_retries)
+                    _copy_without_node_modules(sandbox, project_dir)
+                    return True, project_dir
+
+                logger.warning("Build succeeded but no dist/assets found")
+                _copy_without_node_modules(sandbox, project_dir)
                 return True, project_dir
 
-            logger.warning("Build succeeded but no dist/assets found")
-            return True, project_dir
+            logger.warning("Build failed attempt %d/%d: %s", attempt + 1, max_retries, output[:200])
 
-        logger.warning("Build failed attempt %d/%d: %s", attempt + 1, max_retries, output[:200])
+            if attempt == max_retries - 1 or not gen_callback:
+                return False, output
 
-        if attempt == max_retries - 1 or not gen_callback:
-            return False, output
+            files = await gen_callback(output)
 
-        files = await gen_callback(output)
+            _scaffold_project(sandbox, files)
 
-        _scaffold_project(project_dir, files)
-
-    return False, "Max retries exceeded"
+        return False, "Max retries exceeded"
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
