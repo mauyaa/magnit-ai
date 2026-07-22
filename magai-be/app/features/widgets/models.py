@@ -23,6 +23,7 @@ class Widget(Base, TimestampMixin):
 
     blueprints: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     brand_tokens: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    visual_language: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     widget_logic: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     copywriting: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     design_tokens: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -32,6 +33,10 @@ class Widget(Base, TimestampMixin):
 
     plan_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="one_time")
     lead_cap: Mapped[int] = mapped_column(default=500)
+
+    build_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    build_progress: Mapped[float | None] = mapped_column(nullable=True)
+    build_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

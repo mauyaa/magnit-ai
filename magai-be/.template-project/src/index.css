@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  *:focus {
+    outline: none;
+  }
+  
+  *:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  .widget-container {
+    @apply min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-8;
+  }
+  
+  .widget-card {
+    @apply mx-auto max-w-lg rounded-2xl bg-white p-6 shadow-xl transition-all duration-300 hover:shadow-2xl md:p-8;
+  }
+  
+  .widget-input {
+    @apply w-full rounded-xl border-2 border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 transition-all duration-200 placeholder-gray-400 focus:border-transparent focus:ring-2 focus:ring-offset-2;
+    focus-ring-color: var(--color-primary, #3b82f6);
+  }
+  
+  .widget-button {
+    @apply w-full rounded-xl px-6 py-4 font-semibold text-white transition-all duration-200 hover:scale-[1.02] hover:shadow-lg active:scale-[0.98];
+    background: linear-gradient(135deg, var(--color-primary, #3b82f6), var(--color-accent, #8b5cf6));
+  }
+  
+  .widget-button:hover {
+    box-shadow: 0 10px 30px -10px var(--color-primary, #3b82f6);
+  }
+  
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, var(--color-primary, #3b82f6), var(--color-accent, #8b5cf6));
+  }
+  
+  .glass-card {
+    @apply rounded-2xl border border-white/20 bg-white/10 p-6 shadow-xl backdrop-blur-lg;
+  }
+}

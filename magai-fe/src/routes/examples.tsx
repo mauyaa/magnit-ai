@@ -33,7 +33,7 @@ function Examples() {
   const handleSelect = (id: string) => {
     setSelectedWidget(widgetNames[id] ?? "Widget");
     timerRef.current = window.setTimeout(() => {
-      navigate({ to: "/build-story" });
+      navigate({ to: "/how-it-works" });
     }, 650);
   };
 

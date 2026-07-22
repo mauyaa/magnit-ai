@@ -13,7 +13,9 @@ function Build() {
   return (
     <AppShell activeSection="checkout">
       <CheckoutFlow
-        onComplete={() => navigate({ to: "/build-story", replace: true })}
+        onBuildStart={(widgetId) =>
+          navigate({ to: "/build-story/$widgetId", params: { widgetId }, replace: true })
+        }
         onBack={() => navigate({ to: "/" })}
       />
     </AppShell>

@@ -2,6 +2,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+export interface Blueprint {
+  type: string;
+  title: string;
+  description: string;
+  rationale: string;
+}
+
 export interface WidgetData {
   id: string;
   title: string;
@@ -30,9 +37,28 @@ export interface LeadData {
   created_at: string;
 }
 
+export interface AnalyzeResponse {
+  widget_id: string;
+  blueprints: Blueprint[];
+}
+
+export interface BuildResponse {
+  widget_id: string;
+  iframe_url: string;
+  status: string;
+  embed_code: string;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {}
+    throw new Error(detail);
+  }
   return res.json();
 }
 
@@ -49,6 +75,8 @@ export function useWidget(id: string) {
     queryKey: ["widget", id],
     queryFn: () => fetchJson(`${API_BASE}/api/widgets/${id}`),
     enabled: !!id,
+    refetchInterval: (query) =>
+      query.state.data?.status === "building" ? 3_000 : false,
   });
 }
 
@@ -88,5 +116,39 @@ export function useDeployWidget() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["widgets"] });
     },
+  });
+}
+
+export function useAnalyzeUrl() {
+  return useMutation({
+    mutationFn: (url: string) =>
+      fetchJson<AnalyzeResponse>(`${API_BASE}/api/widgets/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      }),
+  });
+}
+
+export function useBuildWidget() {
+  return useMutation({
+    mutationFn: ({
+      widgetId,
+      blueprintIndex,
+      skipDeploy,
+    }: {
+      widgetId: string;
+      blueprintIndex: number;
+      skipDeploy?: boolean;
+    }) =>
+      fetchJson<BuildResponse>(`${API_BASE}/api/widgets/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          widget_id: widgetId,
+          blueprint_index: blueprintIndex,
+          skip_deploy: skipDeploy ?? false,
+        }),
+      }),
   });
 }

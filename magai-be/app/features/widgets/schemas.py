@@ -37,9 +37,13 @@ class WidgetStatusResponse(BaseModel):
     plan_tier: str
     lead_cap: int
     brand_tokens: dict | None = None
+    visual_language: dict | None = None
     widget_logic: dict | None = None
     copywriting: dict | None = None
     design_tokens: dict | None = None
+    build_stage: str | None = None
+    build_progress: float | None = None
+    build_error: str | None = None
     created_at: str
     deployed_at: str | None = None
 

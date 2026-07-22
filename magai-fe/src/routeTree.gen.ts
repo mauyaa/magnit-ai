@@ -14,12 +14,12 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as HowItWorksRouteImport } from './routes/how-it-works'
 import { Route as ExamplesRouteImport } from './routes/examples'
 import { Route as DesignSystemRouteImport } from './routes/design-system'
-import { Route as BuildStoryRouteImport } from './routes/build-story'
 import { Route as BuildRouteImport } from './routes/build'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as DashboardLeadsRouteImport } from './routes/dashboard/leads'
+import { Route as BuildStoryWidgetIdRouteImport } from './routes/build-story.$widgetId'
 import { Route as DashboardWidgetsWidgetIdRouteImport } from './routes/dashboard/widgets/$widgetId'
 
 const TermsRoute = TermsRouteImport.update({
@@ -47,11 +47,6 @@ const DesignSystemRoute = DesignSystemRouteImport.update({
   path: '/design-system',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BuildStoryRoute = BuildStoryRouteImport.update({
-  id: '/build-story',
-  path: '/build-story',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const BuildRoute = BuildRouteImport.update({
   id: '/build',
   path: '/build',
@@ -77,6 +72,11 @@ const DashboardLeadsRoute = DashboardLeadsRouteImport.update({
   path: '/dashboard/leads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BuildStoryWidgetIdRoute = BuildStoryWidgetIdRouteImport.update({
+  id: '/build-story/$widgetId',
+  path: '/build-story/$widgetId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardWidgetsWidgetIdRoute =
   DashboardWidgetsWidgetIdRouteImport.update({
     id: '/dashboard/widgets/$widgetId',
@@ -88,12 +88,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/build': typeof BuildRoute
-  '/build-story': typeof BuildStoryRoute
   '/design-system': typeof DesignSystemRoute
   '/examples': typeof ExamplesRoute
   '/how-it-works': typeof HowItWorksRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/build-story/$widgetId': typeof BuildStoryWidgetIdRoute
   '/dashboard/leads': typeof DashboardLeadsRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/widgets/$widgetId': typeof DashboardWidgetsWidgetIdRoute
@@ -102,12 +102,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/build': typeof BuildRoute
-  '/build-story': typeof BuildStoryRoute
   '/design-system': typeof DesignSystemRoute
   '/examples': typeof ExamplesRoute
   '/how-it-works': typeof HowItWorksRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/build-story/$widgetId': typeof BuildStoryWidgetIdRoute
   '/dashboard/leads': typeof DashboardLeadsRoute
   '/dashboard': typeof DashboardIndexRoute
   '/dashboard/widgets/$widgetId': typeof DashboardWidgetsWidgetIdRoute
@@ -117,12 +117,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/build': typeof BuildRoute
-  '/build-story': typeof BuildStoryRoute
   '/design-system': typeof DesignSystemRoute
   '/examples': typeof ExamplesRoute
   '/how-it-works': typeof HowItWorksRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/build-story/$widgetId': typeof BuildStoryWidgetIdRoute
   '/dashboard/leads': typeof DashboardLeadsRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/widgets/$widgetId': typeof DashboardWidgetsWidgetIdRoute
@@ -133,12 +133,12 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/build'
-    | '/build-story'
     | '/design-system'
     | '/examples'
     | '/how-it-works'
     | '/privacy'
     | '/terms'
+    | '/build-story/$widgetId'
     | '/dashboard/leads'
     | '/dashboard/'
     | '/dashboard/widgets/$widgetId'
@@ -147,12 +147,12 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/build'
-    | '/build-story'
     | '/design-system'
     | '/examples'
     | '/how-it-works'
     | '/privacy'
     | '/terms'
+    | '/build-story/$widgetId'
     | '/dashboard/leads'
     | '/dashboard'
     | '/dashboard/widgets/$widgetId'
@@ -161,12 +161,12 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/build'
-    | '/build-story'
     | '/design-system'
     | '/examples'
     | '/how-it-works'
     | '/privacy'
     | '/terms'
+    | '/build-story/$widgetId'
     | '/dashboard/leads'
     | '/dashboard/'
     | '/dashboard/widgets/$widgetId'
@@ -176,12 +176,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRoute: typeof AnalyticsRoute
   BuildRoute: typeof BuildRoute
-  BuildStoryRoute: typeof BuildStoryRoute
   DesignSystemRoute: typeof DesignSystemRoute
   ExamplesRoute: typeof ExamplesRoute
   HowItWorksRoute: typeof HowItWorksRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
+  BuildStoryWidgetIdRoute: typeof BuildStoryWidgetIdRoute
   DashboardLeadsRoute: typeof DashboardLeadsRoute
   DashboardIndexRoute: typeof DashboardIndexRoute
   DashboardWidgetsWidgetIdRoute: typeof DashboardWidgetsWidgetIdRoute
@@ -224,13 +224,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DesignSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/build-story': {
-      id: '/build-story'
-      path: '/build-story'
-      fullPath: '/build-story'
-      preLoaderRoute: typeof BuildStoryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/build': {
       id: '/build'
       path: '/build'
@@ -266,6 +259,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardLeadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/build-story/$widgetId': {
+      id: '/build-story/$widgetId'
+      path: '/build-story/$widgetId'
+      fullPath: '/build-story/$widgetId'
+      preLoaderRoute: typeof BuildStoryWidgetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard/widgets/$widgetId': {
       id: '/dashboard/widgets/$widgetId'
       path: '/dashboard/widgets/$widgetId'
@@ -280,12 +280,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRoute: AnalyticsRoute,
   BuildRoute: BuildRoute,
-  BuildStoryRoute: BuildStoryRoute,
   DesignSystemRoute: DesignSystemRoute,
   ExamplesRoute: ExamplesRoute,
   HowItWorksRoute: HowItWorksRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
+  BuildStoryWidgetIdRoute: BuildStoryWidgetIdRoute,
   DashboardLeadsRoute: DashboardLeadsRoute,
   DashboardIndexRoute: DashboardIndexRoute,
   DashboardWidgetsWidgetIdRoute: DashboardWidgetsWidgetIdRoute,

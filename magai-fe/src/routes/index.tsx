@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/magnitai/AppShell";
 import { LandingPage } from "@/components/magnitai/LandingPage";
+import { WaitlistLanding } from "@/components/magnitai/WaitlistLanding";
+
+const isLive ="false";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -23,9 +26,13 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  return (
-    <AppShell activeSection="landing">
-      <LandingPage />
-    </AppShell>
-  );
+  if (isLive) {
+    return (
+      <AppShell activeSection="landing">
+        <LandingPage />
+      </AppShell>
+    );
+  }
+
+  return <WaitlistLanding />;
 }

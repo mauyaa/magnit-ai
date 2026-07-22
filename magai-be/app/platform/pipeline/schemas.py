@@ -39,9 +39,22 @@ class MathLogic(BaseModel):
     example_calculation: str
 
 
+class VisualLanguage(BaseModel):
+    layout: str = "centered-single-column"
+    spacing: str = "comfortable"
+    card_style: str = "solid-white"
+    border_radius: str = "rounded"
+    shadow_depth: str = "subtle"
+    button_style: str = "filled-solid"
+    decorative_elements: str = "none"
+    icon_style: str = "outlined"
+    visual_energy: str = "balanced"
+
+
 class ArchitectOutput(BaseModel):
     widget_type: WidgetType
     brand: BrandExtraction
+    visual_language: VisualLanguage = VisualLanguage()
     logic: MathLogic
     copywriting: dict[str, Any]
 

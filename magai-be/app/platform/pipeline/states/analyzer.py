@@ -14,11 +14,11 @@ SYSTEM_PROMPT = """You are a lead generation strategist and web analyst.
 Your job:
 1. Visit the given URL using the read_url_content tool.
 2. Analyze the business: what they sell, their audience, pricing model, value prop.
-3. Propose 3 interactive lead magnet widgets that would convert their audience.
+3. Propose 3 interactive lead magnet single-page applications that would convert their audience.
 
 Each blueprint must include:
 - type: one of roi_calculator, readiness_quiz, competitive_comparison, audit_tool, interactive_checklist
-- title: A compelling name for the widget
+- title: A compelling name for the app
 - description: What it does and how it works
 - rationale: Why this specific type will convert for this specific business
 
@@ -39,7 +39,7 @@ async def run(agent, url: str) -> BlueprintList:
     prompt = (
         f"Visit {url} and analyze the business model, target audience, "
         f"and value proposition. Then propose 3 interactive lead magnet "
-        f"widgets that would generate qualified leads for this business. "
+        f"single-page applications that would generate qualified leads for this business. "
         f"Return ONLY valid JSON."
     )
     response = await agent.chat(prompt)
