@@ -1,0 +1,139 @@
+# ---------------------------------------------------------------------------
+# Full MagnetAI stack: Postgres, Redis, API, Celery worker, Celery beat, frontend.
+#
+#   cp magai-be/.env.example magai-be/.env   # then fill in the API keys
+#   docker compose up --build
+#
+# Every service that depends on a datastore waits for that datastore's
+# healthcheck, and migrations run to completion before the API or workers start,
+# so a cold `up` converges without manual ordering.
+# ---------------------------------------------------------------------------
+
+name: magnitai
+
+x-backend-env: &backend-env
+  MAGAI_DATABASE_URL: postgresql+asyncpg://magai:${POSTGRES_PASSWORD:-magai-dev-password}@postgres:5432/magai
+  MAGAI_REDIS_URL: redis://redis:6379/0
+  MAGAI_CELERY_BROKER_URL: redis://redis:6379/1
+  MAGAI_CELERY_RESULT_BACKEND: redis://redis:6379/2
+  MAGAI_ENVIRONMENT: ${MAGAI_ENVIRONMENT:-development}
+  MAGAI_SECRET_KEY: ${MAGAI_SECRET_KEY:-local-development-secret-key-not-for-production-use}
+  MAGAI_CORS_ALLOW_ORIGINS: ${MAGAI_CORS_ALLOW_ORIGINS:-http://localhost:3000}
+  MAGAI_FRONTEND_BASE_URL: ${MAGAI_FRONTEND_BASE_URL:-http://localhost:3000}
+  MAGAI_SITE_URL: ${MAGAI_SITE_URL:-http://localhost:8000}
+  MAGAI_LOG_FORMAT: ${MAGAI_LOG_FORMAT:-text}
+  MAGAI_GEMINI_API_KEY: ${MAGAI_GEMINI_API_KEY:-}
+  MAGAI_VERCEL_API_TOKEN: ${MAGAI_VERCEL_API_TOKEN:-}
+  MAGAI_STRIPE_SECRET_KEY: ${MAGAI_STRIPE_SECRET_KEY:-}
+  MAGAI_STRIPE_WEBHOOK_SECRET: ${MAGAI_STRIPE_WEBHOOK_SECRET:-}
+  MAGAI_SENTRY_DSN: ${MAGAI_SENTRY_DSN:-}
+
+x-backend-base: &backend-base
+  build:
+    context: ./magai-be
+  environment: *backend-env
+  volumes:
+    # Generated widget builds are shared: the worker writes them, the API and the
+    # heal sweep redeploy from them.
+    - widget-workspace:/app/workspace
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: magai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-magai-dev-password}
+      POSTGRES_DB: magai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # Exposed for local psql access only; remove in any shared environment.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U magai -d magai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # Persist to disk so queued builds survive a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Runs to completion before the API and workers start, so no service ever
+  # queries a schema that has not been migrated yet.
+  migrate:
+    build:
+      context: ./magai-be
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend-base
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    <<: *backend-base
+    command:
+      ["celery", "-A", "app.platform.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.platform.celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # Exactly one beat process: it is the scheduler. The sweep also takes a
+  # distributed lock, so an accidental second instance cannot double-process.
+  beat:
+    <<: *backend-base
+    command: ["celery", "-A", "app.platform.celery_app", "beat", "--loglevel=info"]
+    deploy:
+      replicas: 1
+
+  frontend:
+    build:
+      context: ./magai-fe
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  widget-workspace:

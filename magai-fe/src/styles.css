@@ -1,0 +1,2136 @@
+@import "tailwindcss" source(none);
+/*
+ * An explicit recursive glob, not a bare directory.
+ *
+ * `@source "../src"` hands Tailwind a directory to auto-detect inside, and
+ * that index does not pick up directories created after it was first built —
+ * not on HMR, and not on a dev-server restart. The failure is silent and
+ * particularly nasty: the component renders, the class is right there in the
+ * DOM, and the utility simply does not exist in the stylesheet, so the element
+ * lays out as though the class had been misspelled. It cost an afternoon once.
+ *
+ * Naming the files as a pattern makes the set explicit and re-expands it every
+ * run, so a new folder is scanned the moment something in it is saved.
+ */
+@source "../src/**/*.{ts,tsx}";
+@import "tw-animate-css";
+
+/*
+ * Variable fonts, deliberately.
+ *
+ * This used to be `@import "@fontsource/geist-sans"`, whose index.css declares
+ * exactly one @font-face: weight 400. Every font-medium / font-semibold /
+ * font-bold in the app therefore had no real weight to use, so the browser
+ * synthesised one by algorithmically smearing the 400 outlines. That is what
+ * made the interface look soft and wavy — it was never the typeface.
+ *
+ * The variable cut carries 100-900 in a single file per subset: no synthesis,
+ * fewer requests, and less total weight than the four static cuts this needs.
+ */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/inter";
+
+@keyframes headline-underline-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.headline-underline {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.headline-underline::after {
+  position: absolute;
+  right: 0.02em;
+  bottom: -0.04em;
+  left: 0.02em;
+  height: 0.045em;
+  min-height: 2px;
+  content: "";
+  background: currentColor;
+  border-radius: 999px;
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: headline-underline-draw 900ms cubic-bezier(0.16, 1, 0.3, 1) 500ms forwards;
+}
+
+.build-cta {
+  --landing-cta: #d8ff3e;
+  --landing-cta-hover: color-mix(in oklch, var(--landing-cta), var(--ink) 8%);
+  position: relative;
+  display: inline-block;
+  color: var(--foreground);
+  border-radius: 999px;
+  isolation: isolate;
+}
+
+.build-cta::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: inherit;
+  transform: translate(0.34rem, 0.38rem);
+  transition: transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.build-cta-face {
+  display: flex;
+  min-width: 15.5rem;
+  height: 3.8rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding: 0.38rem 0.38rem 0.38rem 1.5rem;
+  font-family: "Inter Variable", Inter, Arial, sans-serif;
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: var(--landing-cta);
+  border: 1px solid color-mix(in oklch, var(--ink), transparent 65%);
+  border-radius: inherit;
+  box-shadow:
+    0 1px 0 color-mix(in oklch, white, transparent 25%) inset,
+    var(--shadow-card);
+  transition:
+    transform 400ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 250ms ease;
+}
+
+.build-cta-arrow {
+  display: grid;
+  height: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  color: white;
+  background: var(--ink);
+  border-radius: 50%;
+  transition:
+    transform 400ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 250ms ease;
+}
+
+.build-cta:hover::before {
+  transform: translate(0.18rem, 0.2rem);
+}
+
+.build-cta:hover .build-cta-face {
+  background: var(--landing-cta-hover);
+  border-color: color-mix(in oklch, var(--ink), transparent 45%);
+  transform: translateY(-0.12rem);
+}
+
+.build-cta:hover .build-cta-arrow {
+  background: var(--ink-soft);
+  transform: rotate(-8deg);
+}
+
+.build-cta:active .build-cta-face {
+  transform: translate(0.12rem, 0.14rem);
+}
+
+.build-cta:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .headline-underline::after {
+    transform: scaleX(1);
+    animation: none;
+  }
+}
+
+.showcase-shell {
+  position: relative;
+  display: grid;
+  /*
+   * The wings need a column they actually fit in.
+   *
+   * At 0.7fr against a 38rem centre, a 1440px viewport left each wing about
+   * 240px while the type inside it was set at 7vw — roughly 100px, so "MADE"
+   * measured ~280px. The shell clips its overflow, so the left wing lost its
+   * first letters and "USED." was cut in half at the right edge of the screen.
+   * The wings now get a full 1fr each and the type is sized to fit them.
+   */
+  grid-template-columns: minmax(9rem, 1fr) minmax(32rem, 2.1fr) minmax(9rem, 1fr);
+  min-height: 44rem;
+  overflow: hidden;
+  color: oklch(0.985 0 0);
+  background: var(--ink);
+  border-block: 1px solid color-mix(in oklch, var(--ink), white 12%);
+  isolation: isolate;
+}
+
+.showcase-grid {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.16;
+  background-image:
+    linear-gradient(to right, white 1px, transparent 1px),
+    linear-gradient(to bottom, white 1px, transparent 1px);
+  background-size: 4rem 4rem;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.showcase-wing {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3rem 1.5vw;
+  /* The wing is the query container; the type inside is measured against it.
+     `cqw` in the container's *own* font-size would resolve against an ancestor
+     container instead of itself, so the sizing lives on the children. */
+  container-type: inline-size;
+  font-weight: 700;
+  line-height: 0.82;
+  letter-spacing: -0.07em;
+}
+
+/*
+ * Display type sized off the wing's width, never the viewport's.
+ *
+ * "USED." is the longest word at five characters; at roughly 0.62em of advance
+ * each that is ~3.1em, so 30cqw keeps the widest case inside the column at
+ * every screen size instead of relying on a vw value that happens to fit at
+ * one width and clips at the next.
+ */
+.showcase-wing-left span,
+.showcase-wing-right > span {
+  font-size: clamp(2rem, 30cqw, 5.5rem);
+}
+
+.showcase-wing-left {
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding-top: 7rem;
+  text-align: right;
+}
+
+.showcase-wing-left span {
+  white-space: nowrap;
+}
+
+.showcase-wing-right {
+  justify-content: flex-start;
+  padding-top: 7rem;
+}
+
+.showcase-wing-right > span {
+  /* The signature red, not the accent. The accent is Celery, which on this ink
+     stage would put a near-white green where the page's loudest word goes.
+     Pinned by styles.test.ts for exactly that reason. */
+  color: var(--accent-hot);
+}
+
+.showcase-wing-right p {
+  width: min(16rem, 90%);
+  margin-top: 3rem;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  color: color-mix(in oklch, white, transparent 35%);
+}
+
+.showcase-stage {
+  position: relative;
+  min-height: 44rem;
+}
+
+.showcase-card {
+  position: absolute;
+  /* The cards bleed off the bottom of the stage on purpose, but 4rem sliced
+     the audit card's growth score through the middle of the digits, which
+     reads as a clipping bug rather than as a deliberate crop. */
+  bottom: -1.5rem;
+  display: flex;
+  flex-direction: column;
+  width: clamp(18rem, 25vw, 24rem);
+  min-height: 34rem;
+  padding: 1.65rem;
+  overflow: hidden;
+  color: var(--ink);
+  border: 1px solid color-mix(in oklch, black, transparent 82%);
+  border-radius: 1.25rem;
+  box-shadow:
+    0 1px 0 color-mix(in oklch, white, transparent 68%) inset,
+    0 1.8rem 3.5rem color-mix(in oklch, black, transparent 62%),
+    0 0.35rem 0.75rem color-mix(in oklch, black, transparent 82%);
+  transition:
+    transform 600ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 600ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 450ms ease;
+  transform-origin: center bottom;
+}
+
+.showcase-card::before {
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  border: 1px solid color-mix(in oklch, white, transparent 82%);
+  border-radius: inherit;
+}
+
+.showcase-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.showcase-card:hover {
+  z-index: 10;
+  filter: none;
+}
+
+.showcase-card-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding-bottom: 0.95rem;
+  border-bottom: 1px solid color-mix(in oklch, currentColor, transparent 78%);
+}
+
+.showcase-card-badge,
+.showcase-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.38rem 0.55rem;
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  border: 1px solid color-mix(in oklch, black, transparent 80%);
+  border-radius: 999px;
+}
+
+.showcase-live i {
+  width: 0.38rem;
+  aspect-ratio: 1;
+  background: var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ink), transparent 84%);
+}
+
+.showcase-card-audit {
+  left: 2%;
+  z-index: 1;
+  min-height: 31rem;
+  color: var(--ink);
+  background: linear-gradient(155deg, oklch(0.93 0.145 96), oklch(0.86 0.14 89));
+  transform: rotate(-10deg) translateY(2.5rem);
+}
+
+.showcase-card-audit:hover {
+  transform: rotate(-9deg) translateY(1.7rem);
+}
+
+.showcase-card-calculator {
+  left: 50%;
+  z-index: 4;
+  min-height: 38rem;
+  background: linear-gradient(160deg, oklch(0.93 0.16 116), oklch(0.86 0.17 121));
+  transform: translateX(-50%) rotate(1.5deg);
+}
+
+.showcase-card-calculator:hover {
+  transform: translateX(-50%) rotate(1deg) translateY(-0.5rem);
+}
+
+.showcase-card-quiz {
+  right: 1%;
+  z-index: 2;
+  min-height: 34rem;
+  color: white;
+  background: linear-gradient(155deg, oklch(0.34 0.095 253), oklch(0.23 0.055 263));
+  transform: rotate(9deg) translateY(1.75rem);
+}
+
+.showcase-card-quiz:hover {
+  transform: rotate(8deg) translateY(1rem);
+}
+
+.showcase-orbit {
+  position: absolute;
+  top: 4.5rem;
+  right: -4rem;
+  width: 16rem;
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in oklch, black, transparent 58%);
+  border-radius: 50%;
+  background: repeating-radial-gradient(
+    circle,
+    transparent 0 10px,
+    color-mix(in oklch, black, transparent 82%) 11px 12px
+  );
+}
+
+.showcase-audit-content {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+}
+
+.showcase-audit-content > p,
+.showcase-calculator-intro > p,
+.showcase-quiz-copy > p {
+  font-size: 0.92rem;
+  color: color-mix(in oklch, var(--ink), transparent 35%);
+}
+
+.showcase-audit-content h3,
+.showcase-calculator-intro h3,
+.showcase-quiz-copy h3 {
+  margin-top: 0.55rem;
+  font-size: clamp(2rem, 2.7vw, 2.55rem);
+  font-weight: 600;
+  line-height: 0.94;
+  letter-spacing: -0.058em;
+}
+
+.showcase-score {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: 1.7rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in oklch, black, transparent 76%);
+}
+
+.showcase-score > div:first-child > span,
+.showcase-score > div:first-child > strong {
+  display: block;
+}
+
+.showcase-score > div:first-child > span {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.showcase-score > div:first-child > strong {
+  margin-top: 0.15rem;
+  font-size: 4.4rem;
+  line-height: 0.82;
+  letter-spacing: -0.09em;
+}
+
+.showcase-score-ring {
+  display: grid;
+  width: 3.5rem;
+  aspect-ratio: 1;
+  place-items: center;
+  background: conic-gradient(
+    var(--ink) 0 84%,
+    color-mix(in oklch, var(--ink), transparent 84%) 84%
+  );
+  border-radius: 50%;
+}
+
+.showcase-score-ring span {
+  width: 2.55rem;
+  aspect-ratio: 1;
+  background: oklch(0.89 0.14 94);
+  border-radius: 50%;
+}
+
+.showcase-insight {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 1.1rem;
+  padding: 0.72rem 0.8rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: color-mix(in oklch, white, transparent 78%);
+  border: 1px solid color-mix(in oklch, black, transparent 86%);
+  border-radius: 0.8rem;
+}
+
+.showcase-calculator-intro {
+  margin-top: 1.8rem;
+}
+
+.showcase-calculator-intro h3 {
+  max-width: 12ch;
+}
+
+.showcase-controls {
+  margin-top: 1.8rem;
+}
+
+.showcase-control-label,
+.showcase-control-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.showcase-control-label > span {
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.showcase-control-label > strong {
+  padding: 0.42rem 0.7rem;
+  font-size: 0.8rem;
+  border: 1px solid color-mix(in oklch, black, transparent 78%);
+  border-radius: 999px;
+}
+
+.showcase-slider {
+  position: relative;
+  height: 0.42rem;
+  margin-top: 0.9rem;
+  background: color-mix(in oklch, black, transparent 84%);
+  border-radius: 99px;
+}
+
+.showcase-slider i {
+  display: block;
+  width: 68%;
+  height: 100%;
+  background: var(--ink);
+  border-radius: inherit;
+}
+
+.showcase-slider b {
+  position: absolute;
+  top: 50%;
+  left: 68%;
+  width: 1.05rem;
+  aspect-ratio: 1;
+  background: var(--card);
+  border: 0.28rem solid var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px color-mix(in oklch, black, transparent 74%);
+  transform: translate(-50%, -50%);
+}
+
+.showcase-control-foot {
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  color: color-mix(in oklch, var(--ink), transparent 48%);
+}
+
+.showcase-calculator-result {
+  margin-top: auto;
+  padding-top: 1.2rem;
+}
+
+.showcase-calculator-result > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.showcase-calculator-result > strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: clamp(4rem, 5.2vw, 5.3rem);
+  line-height: 0.85;
+  letter-spacing: -0.095em;
+}
+
+.showcase-calculator-result > p {
+  max-width: 27ch;
+  margin-top: 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: color-mix(in oklch, var(--ink), transparent 38%);
+}
+
+.showcase-card-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1.1rem;
+  padding: 0.75rem 0.95rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: white;
+  background: var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 0.25rem 0.6rem color-mix(in oklch, black, transparent 84%);
+}
+
+.showcase-quiz-progress {
+  height: 0.28rem;
+  margin-top: 1rem;
+  overflow: hidden;
+  background: color-mix(in oklch, white, transparent 84%);
+  border-radius: 99px;
+}
+
+.showcase-quiz-progress i {
+  display: block;
+  width: 25%;
+  height: 100%;
+  background: oklch(0.88 0.12 118);
+  border-radius: inherit;
+}
+
+.showcase-quiz-copy {
+  margin-top: 2rem;
+}
+
+.showcase-quiz-copy > p {
+  color: color-mix(in oklch, white, transparent 38%);
+}
+
+.showcase-quiz-copy h3 {
+  max-width: 12ch;
+}
+
+.showcase-options {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: auto;
+}
+
+.showcase-options > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.72rem 0.78rem;
+  font-size: 0.7rem;
+  color: color-mix(in oklch, white, transparent 20%);
+  background: color-mix(in oklch, white, transparent 94%);
+  border: 1px solid color-mix(in oklch, white, transparent 82%);
+  border-radius: 0.75rem;
+}
+
+.showcase-options > span.is-selected {
+  color: var(--ink);
+  background: oklch(0.94 0.035 100);
+  border-color: transparent;
+}
+
+.showcase-options i {
+  display: grid;
+  width: 1.35rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.showcase-quiz-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-top: 1px solid color-mix(in oklch, white, transparent 78%);
+}
+
+.showcase-serif {
+  font-family: var(--font-display);
+}
+
+@media (max-width: 900px) {
+  .showcase-shell {
+    grid-template-columns: 1fr;
+    min-height: 47rem;
+  }
+
+  .showcase-wing {
+    position: absolute;
+    top: 2.5rem;
+    padding: 0 1.25rem;
+    font-size: clamp(3.5rem, 15vw, 6rem);
+  }
+
+  .showcase-wing-left {
+    left: 0;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .showcase-wing-left span:last-child,
+  .showcase-wing-right p {
+    display: none;
+  }
+
+  .showcase-wing-right {
+    right: 0;
+    padding-top: 0;
+  }
+
+  .showcase-stage {
+    min-height: 47rem;
+    margin-top: 5rem;
+  }
+
+  .showcase-card {
+    width: min(72vw, 20rem);
+  }
+
+  .showcase-card-audit {
+    left: -8%;
+  }
+
+  .showcase-card-calculator {
+    left: 50%;
+  }
+
+  .showcase-card-quiz {
+    right: -10%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .showcase-card {
+    transition: none;
+  }
+}
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system definition.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  /* "Geist Variable" is the family name fontsource's variable build registers.
+     The static "Geist Sans" stays in the stack so a cached older build still
+     resolves, then the system UI face, so a font failure degrades to something
+     designed rather than to Times. */
+  /*
+   * The display face — one stack, one place.
+   *
+   * This serif was already in the product, hardcoded at four separate call
+   * sites with three *different* fallback chains: one ended
+   * "Palatino, Georgia, serif", one dropped "Book Antiqua", one was only
+   * only the face plus Georgia. That face ships with macOS and with almost
+   * nothing else, so on the machines that matter those three resolved to three
+   * different fonts — Palatino here, Georgia there — and the product rendered
+   * its own display face inconsistently depending on which component you were
+   * looking at. That is most of what reads as "assembled rather than designed".
+   *
+   * Reserved for display scale: the hero, the auth screen, the marketing
+   * moments. Product chrome stays on the sans below, because a serif at 13px in
+   * a dense table is a costume, not a typeface.
+   */
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  /* Deliberately the same stack as --font-sans, not an oversight: in-product
+     headings share the body face so the dashboard reads as one surface. The
+     separate name is what lets that decision be reversed in one edit. */
+  --font-heading: "Geist Variable", "Geist Sans", system-ui, sans-serif;
+  --font-sans: "Geist Variable", "Geist Sans", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-lead: var(--chart-lead);
+  --color-chart-rest: var(--chart-rest);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-accent-warm: var(--accent-warm);
+  --color-accent-cool: var(--accent-cool);
+  --color-oasis: var(--oasis);
+  --color-oasis-solid: var(--oasis-solid);
+  --color-oasis-wash: var(--oasis-wash);
+  --color-ice: var(--ice);
+  --color-cream: var(--cream);
+
+  /* The neutral ramp, exposed so a component can reach for a specific step
+     (text-n-600) instead of inventing a one-off opacity like text-white/70. */
+  --color-n-0: var(--n-0);
+  --color-n-25: var(--n-25);
+  --color-n-50: var(--n-50);
+  --color-n-100: var(--n-100);
+  --color-n-200: var(--n-200);
+  --color-n-300: var(--n-300);
+  --color-n-400: var(--n-400);
+  --color-n-500: var(--n-500);
+  --color-n-600: var(--n-600);
+  --color-n-700: var(--n-700);
+  --color-border-strong: var(--border-strong);
+  --color-brand: var(--brand);
+  --color-brand-solid: var(--brand-solid);
+  --color-brand-wash: var(--brand-wash);
+
+  /* The inverse (ink panel) ramp, so a dark card reaches for a named step the
+     same way a light one does — `text-inverse-muted`, not `text-white/45`. */
+  --color-inverse: var(--inverse);
+  --color-inverse-raised: var(--inverse-raised);
+  --color-inverse-foreground: var(--inverse-foreground);
+  --color-inverse-muted: var(--inverse-muted);
+  --color-inverse-subtle: var(--inverse-subtle);
+  --color-inverse-border: var(--inverse-border);
+  --color-brand-on-inverse: var(--brand-on-inverse);
+
+  --shadow-raised: var(--shadow-raised);
+  --shadow-card: var(--shadow-card);
+  --shadow-float: var(--shadow-float);
+  --radius-surface: var(--radius-surface);
+
+  --animate-float: float 18s ease-in-out infinite;
+  --animate-float-reverse: float-reverse 20s ease-in-out infinite;
+
+  @keyframes float {
+    0% {
+      transform: translateY(0px) translateX(0px);
+    }
+    33% {
+      transform: translateY(-30px) translateX(20px);
+    }
+    66% {
+      transform: translateY(20px) translateX(-20px);
+    }
+    100% {
+      transform: translateY(0px) translateX(0px);
+    }
+  }
+
+  /* Owned outright rather than borrowed from tw-animate-css, whose animate-in
+     runs with fill-mode: none — the element sits at opacity 0 before the
+     animation starts and snaps back when it ends. */
+  @keyframes demoFade {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.995);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes float-reverse {
+    0% {
+      transform: translateY(0px) translateX(0px);
+    }
+    33% {
+      transform: translateY(30px) translateX(-20px);
+    }
+    66% {
+      transform: translateY(-20px) translateX(20px);
+    }
+    100% {
+      transform: translateY(0px) translateX(0px);
+    }
+  }
+}
+
+/*
+ * ============================================================================
+ * Paper & Acid — the Magnitai colour system
+ * ============================================================================
+ *
+ * Rebuilt after studying how mature product sites actually construct a palette
+ * (sensiq.co, eleken.co, incredibles.dev all share the same skeleton):
+ *
+ *   1. THE GROUND IS NOT WHITE. Every one of them puts a faintly tinted paper
+ *      behind the content and floats pure-white cards on top. Ours had
+ *      background at L 0.985 and card at L 1.0 — a 1.5% difference nobody can
+ *      see, so nothing looked layered and everything read flat. That is most of
+ *      what felt amateur. Paper now sits at L 0.968, a real step below white.
+ *
+ *   2. INK IS TINTED AND COOL. #0f0f16, #1d1e22, #2b2b2b — never pure black,
+ *      and cool against the warm paper. The tension between a warm ground and a
+ *      cool ink is what stops a light interface looking washed out.
+ *
+ *   3. GREYS ARE A RAMP, NOT A VALUE. Eleken alone uses four distinct greys for
+ *      text. We had one --muted-foreground doing every job, so nothing could be
+ *      more or less important than anything else. There are now five text
+ *      weights and three border weights, each with a stated purpose.
+ *
+ *   4. ONE SATURATED ACCENT, USED SPARINGLY. Theirs are acid yellow, orange,
+ *      hot pink. Ours was coral, competing with a second brand colour — exactly
+ *      the "colours don't feel right" problem. The coral is gone.
+ *
+ *      THE ACCENT IS THE LOGO'S RED. `--brand` is oklch(0.618 0.244 28), which
+ *      resolves to #f6191c, the red in the mark. `src/styles.test.ts` pins that
+ *      value; treat the mark and that test as the source of truth, and do not
+ *      reintroduce a second brand colour beside it.
+ *
+ *      The one acid-lime survivor is `--landing-cta`, declared once inside
+ *      `.build-cta` on the marketing page and nowhere else. It is a
+ *      single high-contrast call to action against paper, not a brand colour,
+ *      and it is pinned by the same test file so it cannot spread by accident.
+ *      An earlier revision of this comment described the lime as the only
+ *      accent and the mark as lime; both were left behind by the move to red,
+ *      and reading them was how the app screens ended up on a palette the
+ *      tokens no longer used.
+ *
+ * Contrast rules that constrain the values below:
+ *   - The lime is a SURFACE colour. At L 0.90 it can never carry small text on
+ *     a light ground; it takes ink on top of it, or it is a fill.
+ *   - The brand red is not readable under white text at small sizes (4.14:1).
+ *     `--brand-solid` is a step darker for anything that carries a label.
+ *   - The dark ink is the primary action colour. That matches all three
+ *     references — their buttons are near-black, not accent-coloured.
+ *   - Every text token is checked against both --background and --card.
+ */
+:root {
+  /* Two radii, not one. Controls stay crisp; large surfaces get more curve, so
+     the hierarchy is legible from across the room. */
+  --radius: 0.625rem;
+  --radius-surface: 1rem;
+
+  /* --- neutral ramp: paper (warm, hue 95) ------------------------------- */
+  --n-0: oklch(1 0 0);
+  --n-25: oklch(0.988 0.002 95);
+  --n-50: oklch(0.968 0.004 95);
+  --n-100: oklch(0.948 0.005 95);
+  --n-200: oklch(0.918 0.006 95);
+  --n-300: oklch(0.872 0.007 95);
+  --n-400: oklch(0.735 0.009 95);
+  /* Set against the *darkest* surface muted text ever sits on — --secondary
+     (n-100), not white. Measured: 4.65:1 on secondary, 4.93:1 on paper, 5.41:1
+     on card. Tuning this against white alone is how it shipped at 4.25:1 on the
+     page ground and 4.27:1 inside chips, both of which fail AA — and tuning it
+     against paper alone is how it then sat at 4.49:1 on secondary, failing by a
+     hundredth, which no eye catches and no test caught either. */
+  --n-500: oklch(0.524 0.011 95);
+  --n-600: oklch(0.452 0.012 95);
+  --n-700: oklch(0.352 0.012 95);
+
+  /* --- ink: Black Feather, hue 183 ---------------------------------------
+   *
+   * #081412. Near-black with a faint teal cast rather than a blue one, which is
+   * what keeps it from going navy against the warm ground. Measured: 17.5:1 on
+   * cream, 17.1:1 on paper, 18.8:1 on card, 16.7:1 on Celery, 10.7:1 on Oasis —
+   * so ink is legible on every surface in the system without exception, which is
+   * what lets it carry every primary action.
+   */
+  --ink: oklch(0.179 0.018 183);
+  --ink-soft: oklch(0.28 0.016 183);
+
+  /* --- accent: Celery ----------------------------------------------------
+   *
+   * #e1fcad, at oklch(0.953 0.105 124).
+   *
+   * It is a SURFACE, not a label colour. At L 95 nothing legible can sit on it
+   * except ink — which reaches 16.7:1, so ink-on-Celery is the pairing, always.
+   * White on Celery is 1.1:1 and must never appear.
+   *
+   * The accent's job is to mark the one thing per screen that matters most, as
+   * a fill behind ink. Primary actions stay ink, matching every reference this
+   * system was built against: their buttons are near-black, not accent-coloured.
+   *
+   * --brand-solid exists for the rare case that needs a green that carries a
+   * white label: L 0.52 at this hue measures 5.25:1 against white.
+   */
+  --brand: oklch(0.953 0.105 124);
+  --brand-solid: oklch(0.52 0.16 124);
+  --brand-hover: oklch(0.46 0.15 124);
+  --brand-wash: oklch(0.978 0.035 124);
+
+  /* --- secondary accent: Oasis -------------------------------------------
+   *
+   * #a7c5f9. The cool counterweight to Celery, and the reason the palette does
+   * not read as one green note repeated. Same rule: a surface that takes ink
+   * (10.7:1), never a text colour on light. It marks the *assisted* half of the
+   * product — the paths where the model is doing the work — so the two build
+   * routes are separable by colour before a word is read.
+   */
+  --oasis: oklch(0.82 0.081 261);
+  --oasis-solid: oklch(0.52 0.15 261);
+  --oasis-wash: oklch(0.965 0.03 261);
+
+  /* --- Diamond Ice --------------------------------------------------------
+   * #f7fdff. A cool near-white for cards that need to separate from the warm
+   * ground by temperature rather than by another border. */
+  --ice: oklch(0.99 0.007 220);
+
+  /* The marketing ground. Warmer and a step lighter than the app's paper: the
+     public pages should feel like paper stock, the workspace like a desk. */
+  --cream: oklch(0.976 0.008 95);
+
+  /* --- the inverse surface: ink panels ----------------------------------
+   *
+   * The dark panel was being hand-mixed in every file that wanted one:
+   * #171a21 in eight places, #15171d in six, #1d1e22 and #0f0f16 elsewhere.
+   * Measured against --ink, all four sit within 1.09:1 — they are the same
+   * colour typed four ways, which is drift, not intent.
+   *
+   * Worse was the text on top of them: white at /38, /40, /45, /50, /55, /70
+   * and /80 opacity, seven values doing three jobs, none of them checked. The
+   * light side got a neutral ramp for exactly this reason; the dark side never
+   * did. This is that ramp.
+   *
+   * Every value measured against --ink (see DESIGN.md for the table):
+   *   foreground 16.93:1 · muted 6.56:1 · subtle 4.81:1 · brand 6.03:1
+   */
+  --inverse: var(--ink);
+  /* A card raised off an ink panel. 1.13:1 — a step you can see without it
+     reading as a second colour. */
+  --inverse-raised: oklch(0.245 0.017 183);
+  --inverse-foreground: var(--n-25);
+  --inverse-muted: oklch(0.7 0.014 183);
+  --inverse-subtle: oklch(0.62 0.014 183);
+  --inverse-border: oklch(0.3 0.015 183);
+  /* The red this replaced measured 4.24:1 on ink and had to be lifted to a
+     different value to survive there. Celery does not: at L 95 it reaches
+     16.7:1 on ink, so the accent is the *same colour* on both sides of the
+     system. One less value to keep in sync, and the dark panels finally carry
+     the actual brand rather than a stand-in for it. */
+  --brand-on-inverse: var(--brand);
+
+  /* --- semantic ---------------------------------------------------------- */
+  --background: var(--n-50);
+  --foreground: var(--ink);
+
+  --card: var(--n-0);
+  --card-foreground: var(--ink);
+
+  --popover: var(--n-0);
+  --popover-foreground: var(--ink);
+
+  /* Actions are ink, like every reference. The accent marks state, not verbs. */
+  --primary: var(--ink);
+  --primary-foreground: var(--n-25);
+
+  /* Secondary is an *interactive* fill — chips, secondary buttons, hover
+     states — so it sits a step stronger than muted, which is a passive wash
+     behind inert content. They were the same value, which is why a hovered
+     control and a disabled region looked identical. */
+  --secondary: var(--n-100);
+  --secondary-foreground: var(--ink-soft);
+
+  --muted: var(--n-50);
+  /* 4.6:1 on card, 4.4:1 on paper — the lightest grey still safe for body text. */
+  --muted-foreground: var(--n-500);
+
+  /* Ink, not white. White on Celery measures 1.10:1 — invisible. This token
+     was --n-0 while the accent was a mid-dark red, and carrying that pairing
+     over unchanged would have shipped white labels on a near-white green. */
+  --accent: var(--brand);
+  --accent-foreground: var(--ink);
+  --accent-warm: var(--brand);
+  --accent-hot: oklch(0.618 0.244 28);
+  /* Was a violet at hue 300 belonging to no part of the palette. The second
+     accent is Oasis, which is in it. */
+  --accent-cool: var(--oasis);
+
+  /* Red is no longer the brand, which frees it to mean exactly one thing:
+     something went wrong. Errors stay text and outlines rather than filled
+     blocks, so form separates them as well as hue. */
+  --destructive: oklch(0.505 0.17 22);
+  --destructive-foreground: var(--n-0);
+  /* Carries text — "Connected", "Updated" — on both card and paper, so it is
+     tuned against the darker of the two: 5.09:1 on card, 4.64:1 on paper. At
+     the previous 0.55 it measured 4.12:1 on paper and failed. */
+  --success: oklch(0.52 0.13 160);
+  /* Tuned for *text*, not just for an icon. At 0.62 amber measured 3.72:1 on
+     card — fine for a graphic, a failure the moment anyone writes
+     `text-warning` on a sentence, which a token with this name invites. Now
+     5.05:1 on card and 4.61:1 on paper. */
+  --warning: oklch(0.545 0.13 75);
+  --info: oklch(0.53 0.16 255);
+
+  --border: var(--n-200);
+  --border-strong: var(--n-300);
+  --input: var(--n-300);
+  /* Ink, not the accent: a focus ring has to be seen on every surface, and a
+     saturated hue against warm paper is weaker than plain contrast. */
+  --ring: var(--ink);
+
+  /* --- elevation: three steps, all soft ---------------------------------- */
+  --shadow-raised: 0 1px 2px oklch(0.215 0.016 265 / 0.05);
+  --shadow-card: 0 2px 4px oklch(0.215 0.016 265 / 0.04), 0 8px 24px oklch(0.215 0.016 265 / 0.06);
+  --shadow-float: 0 4px 8px oklch(0.215 0.016 265 / 0.05), 0 16px 40px oklch(0.215 0.016 265 / 0.1);
+
+  --chart-1: var(--brand-solid);
+  --chart-2: var(--ink);
+  --chart-3: oklch(0.62 0.14 165);
+  --chart-4: oklch(0.74 0.15 80);
+  --chart-5: oklch(0.5 0.2 300);
+
+  /*
+   * The activity chart is a part-to-whole, not two peer series: a lead can only
+   * come from a start, so the bar is the total and the coloured foot is the
+   * converted share.
+   *
+   * --chart-lead is --brand-solid, the one accent, spent on the number that
+   * matters. --chart-rest is the remainder, and is a neutral on purpose — it is
+   * not a second category, it is "everyone else". It sits at L 0.64 rather than
+   * anywhere lighter because a mark has to clear 3:1 against the card it is
+   * drawn on to be perceivable at all, and the border greys (n-200/n-300) do
+   * not: measured 3.36:1 here against 1.5:1 for n-300.
+   *
+   * Checked with the palette validator: CVD separation ΔE 10.7 (deutan), normal
+   * vision 21.6, both marks above the contrast floor.
+   */
+  --chart-lead: var(--brand-solid);
+  --chart-rest: oklch(0.64 0.011 95);
+
+  --sidebar: var(--n-25);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--n-25);
+  --sidebar-accent: var(--n-100);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--n-200);
+  --sidebar-ring: var(--ink);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    /* No -webkit-font-smoothing override. Forcing `antialiased` throws away
+       subpixel rendering and makes dark-on-light text render a stem lighter,
+       which reads as soft — the opposite of what it is usually added for. */
+    min-width: 320px;
+    font-synthesis-weight: none;
+  }
+
+  /*
+   * Tracking is optical, not one number.
+   *
+   * A blanket -0.04em was applied to every heading. At the 56px hero that is
+   * about right; at an 18px section heading it pulls the letters into each
+   * other and is a large part of why the type read as mushy. Headings now
+   * default to a restrained value and only display sizes opt into tight
+   * tracking, via .text-display / .text-title below.
+   */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.013em;
+    text-wrap: balance;
+  }
+  button,
+  a,
+  input,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 3px;
+  }
+
+  /* Ensure focus rings have sufficient contrast against primary backgrounds */
+  .bg-primary:focus-visible,
+  .bg-primary *:focus-visible {
+    outline-color: var(--color-primary-foreground);
+  }
+
+  /* Selection picks up the accent. A one-line detail, but it is the kind of
+     thing that separates a product that was designed from one that was
+     assembled — and the default browser blue would be a fourth brand colour. */
+  ::selection {
+    background: var(--brand-wash);
+    color: var(--ink);
+  }
+}
+
+@layer utilities {
+  /*
+   * Surfaces.
+   *
+   * The single biggest reason the interface read as flat: content sat directly
+   * on the page with a 1px border and nothing else. Real products put content
+   * on a card that is lighter than its ground and carries a soft shadow, so
+   * the eye gets a foreground and a background instead of one plane.
+   *
+   * .surface  — the default card: white on paper, hairline, soft lift.
+   * .surface-flat — same colour, no lift, for dense lists where a shadow per
+   *                 row would be noise.
+   * .surface-sunken — recessed, for code blocks and inputs.
+   */
+  .surface {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-surface);
+    box-shadow: var(--shadow-card);
+  }
+  .surface-flat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-surface);
+  }
+  .surface-sunken {
+    background: var(--n-100);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  /* A hairline that reads at 1px on every DPR. Plain border-b on a 2x screen
+     renders inconsistently; an inset ring does not. */
+  .hairline {
+    box-shadow: inset 0 -1px 0 var(--border);
+  }
+
+  /*
+   * Buttons.
+   *
+   * These were an eight-class Tailwind string copy-pasted onto every action,
+   * which is how they drifted: some 11px tall, some 12, three different hover
+   * behaviours, and one that hovered from ink to coral. Worse, after the accent
+   * change `hover:bg-primary` on a `bg-foreground` button became a no-op —
+   * every primary action in the product had silently lost its hover state.
+   *
+   * .btn-accent exists to be used once per screen, on the single action that
+   * moves the customer forward. If two of them are visible at the same time,
+   * one of them is wrong.
+   */
+  /* `display` is set through :where() so it carries zero specificity. Declared
+     normally, `.btn` beat Tailwind's own display utilities — `md:hidden` and
+     `hidden sm:inline-flex` silently stopped working, which is why the mobile
+     menu button was showing on desktop. Every other property here is a real
+     `.btn` declaration and should win. */
+  :where(.btn) {
+    display: inline-flex;
+  }
+  .btn {
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    padding-inline: 1.25rem;
+    border-radius: var(--radius);
+    font-size: 0.9375rem;
+    font-weight: 550;
+    letter-spacing: -0.006em;
+    white-space: nowrap;
+    transition:
+      background-color 150ms ease,
+      box-shadow 150ms ease,
+      border-color 150ms ease,
+      transform 80ms ease;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(0.5px);
+  }
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: var(--ink);
+    color: var(--n-25);
+    box-shadow: var(--shadow-raised);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--ink-soft);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* --brand-solid, not --brand: white on the logo red measures 4.14:1 and
+     fails AA. The label has to be readable before the colour is exact. */
+  .btn-accent {
+    background: var(--brand-solid);
+    color: var(--n-0);
+    box-shadow: var(--shadow-raised);
+  }
+  .btn-accent:hover:not(:disabled) {
+    background: var(--brand-hover);
+    box-shadow: var(--shadow-card);
+  }
+
+  .btn-secondary {
+    background: var(--card);
+    color: var(--foreground);
+    border: 1px solid var(--border-strong);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--n-50);
+    border-color: var(--n-400);
+  }
+
+  .btn-ghost {
+    color: var(--muted-foreground);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--n-100);
+    color: var(--foreground);
+  }
+
+  /*
+   * The type scale. Four steps, each with its own tracking and leading, so a
+   * heading is one class instead of a hand-tuned clamp() repeated per page.
+   * Weights use the variable font's in-between values (550, 520) — with real
+   * axes available, 500 is a touch light for a headline and 600 a touch heavy.
+   */
+  .text-display {
+    font-size: clamp(2.5rem, 5.5vw, 4rem);
+    line-height: 1.03;
+    letter-spacing: -0.032em;
+    font-weight: 550;
+  }
+  .text-title {
+    font-size: clamp(1.75rem, 3.2vw, 2.25rem);
+    line-height: 1.1;
+    letter-spacing: -0.024em;
+    font-weight: 550;
+  }
+  .text-heading {
+    font-size: 1.3125rem;
+    line-height: 1.25;
+    letter-spacing: -0.016em;
+    font-weight: 550;
+  }
+  .text-subheading {
+    font-size: 1.0625rem;
+    line-height: 1.4;
+    letter-spacing: -0.008em;
+    font-weight: 520;
+  }
+  /* Body copy sits at 16.5px: 16 is a shade small for a marketing page, 17
+     starts to feel like large print in the app. */
+  .text-body {
+    font-size: 1.03125rem;
+    line-height: 1.6;
+    letter-spacing: 0;
+  }
+
+  /* Texture layers retired. They sat on top of every screen and competed
+     with the one thing that should hold attention: the generated widget.
+     Kept as no-ops so existing markup stays valid. */
+  .surface-grid,
+  .grain-overlay,
+  .cta-orb {
+    display: none;
+  }
+
+  .hero-accent {
+    color: var(--color-primary);
+  }
+
+  /* Was 11px/700/0.16em uppercase — the tracked-caps eyebrow DESIGN.md
+     names as the category's default slop. Now a quiet label that sits
+     under the headline instead of shouting above it. */
+  .eyebrow {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-muted-foreground);
+  }
+  .eyebrow-on-dark {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: color-mix(in oklch, white 70%, transparent);
+  }
+
+  /* Numbers that sit in columns or update live must not jitter. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Cinematic signal-to-interface sequence. One transformation, one focal result. */
+.cinema-section {
+  --cinema-blue: oklch(0.68 0.18 247);
+  --cinema-lime: oklch(0.9 0.22 118);
+  padding: 0 0 clamp(5rem, 8vw, 7rem);
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * Same measure and gutter as every other section on the page.
+ *
+ * This block sat at 74rem inside a 1.5rem gutter while the sections above and
+ * below it sat at 72rem inside `px-6 lg:px-8`. Two rems of width and half a rem
+ * of inset is invisible as a number and very visible as a page: headings down
+ * the left edge landed on three different x positions.
+ */
+.cinema-layout,
+.cinema-heading {
+  width: min(72rem, 100%);
+  margin-inline: auto;
+  /*
+   * The gutter goes *inside* the measure, matching `px-6 lg:px-8` on the
+   * sections above and below. Outside it — where it used to be, on the section
+   * itself — the same 72rem measure lands this content 32px to the left of
+   * theirs, which is why headings down the page sat on two different x
+   * positions.
+   */
+  padding-inline: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .cinema-layout,
+  .cinema-heading {
+    padding-inline: 2rem;
+  }
+}
+
+.cinema-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: clamp(5rem, 8vw, 7rem) clamp(4rem, 6vw, 5rem);
+}
+
+.cinema-heading h2 {
+  max-width: 18ch;
+  margin-inline: auto;
+  text-align: center;
+  font-size: clamp(2.55rem, 4.4vw, 4.25rem);
+  font-weight: 520;
+  line-height: 1.01;
+  letter-spacing: -0.047em;
+  text-wrap: balance;
+}
+
+.cinema-knows {
+  position: relative;
+  z-index: 0;
+  display: inline-block;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.cinema-knows::before {
+  position: absolute;
+  inset: 0.1em -0.08em 0.02em;
+  z-index: -1;
+  content: "";
+  /* Magnitai's own emphasis, so it wears Magnitai's accent. This was the last
+     place on the marketing page still highlighting in the retired lime. */
+  border: 1px solid color-mix(in oklch, var(--brand), transparent 55%);
+  border-radius: 48% 52% 45% 55% / 58% 44% 56% 42%;
+  background: var(--brand-wash);
+  transform: rotate(-1.25deg);
+}
+
+.cinema-layout {
+  display: grid;
+  grid-template-columns: minmax(21rem, 0.78fr) minmax(36rem, 1.22fr);
+  align-items: center;
+  gap: clamp(3rem, 6vw, 6rem);
+}
+
+.cinema-copy {
+  align-self: center;
+}
+
+.cinema-copy > h3 {
+  max-width: 13ch;
+  font-size: clamp(2rem, 3.3vw, 3rem);
+  font-weight: 550;
+  line-height: 1.02;
+  letter-spacing: -0.042em;
+}
+
+.cinema-copy > p {
+  max-width: 30rem;
+  margin-top: 0.9rem;
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--muted-foreground);
+}
+
+.cinema-copy form {
+  max-width: 31rem;
+  margin-top: 2.4rem;
+}
+
+.cinema-copy label {
+  display: block;
+  margin-bottom: 0.7rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.cinema-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem;
+  padding-left: 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.cinema-input:focus-within {
+  border-color: var(--cinema-blue);
+  box-shadow:
+    var(--shadow-card),
+    0 0 0 4px color-mix(in oklch, var(--cinema-blue), transparent 87%);
+}
+
+.cinema-input input {
+  min-width: 0;
+  flex: 1;
+  padding-block: 0.72rem;
+  font-size: 0.94rem;
+  background: transparent;
+  outline: none;
+}
+
+.cinema-input input::placeholder {
+  color: var(--n-400);
+}
+
+.cinema-input button {
+  display: inline-flex;
+  height: 2.75rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding-inline: 1.1rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: white;
+  background: var(--ink);
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background 180ms ease;
+}
+
+.cinema-input button:hover {
+  background: var(--ink-soft);
+}
+
+.cinema-stage {
+  position: relative;
+  min-height: 38rem;
+  overflow: hidden;
+  color: white;
+  background:
+    linear-gradient(color-mix(in oklch, white, transparent 96%) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, white, transparent 96%) 1px, transparent 1px),
+    var(--ink);
+  background-size: 40px 40px;
+  border: 1px solid color-mix(in oklch, var(--cinema-blue), transparent 53%);
+  border-radius: 2rem;
+  box-shadow:
+    0 2.5rem 7rem color-mix(in oklch, var(--cinema-blue), transparent 82%),
+    inset 0 0 0 1px color-mix(in oklch, white, transparent 94%);
+  isolation: isolate;
+}
+
+.cinema-stage::after {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  content: "";
+  border: 1px solid color-mix(in oklch, white, transparent 90%);
+  border-radius: inherit;
+  box-shadow: inset 0 0 3rem color-mix(in oklch, var(--cinema-blue), transparent 92%);
+}
+
+.cinema-ambient {
+  position: absolute;
+  z-index: -1;
+  width: 22rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  filter: blur(5.5rem);
+  opacity: 0.34;
+  transition:
+    opacity 800ms ease,
+    transform 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cinema-ambient-blue {
+  top: -8rem;
+  left: -7rem;
+  background: var(--cinema-blue);
+}
+
+.cinema-ambient-lime {
+  right: -8rem;
+  bottom: -9rem;
+  background: var(--cinema-lime);
+}
+
+.is-composed .cinema-ambient-blue {
+  opacity: 0.2;
+  transform: translate(7rem, 3rem);
+}
+
+.is-composed .cinema-ambient-lime {
+  opacity: 0.48;
+  transform: translate(-4rem, -3rem);
+}
+
+.cinema-chaos {
+  position: absolute;
+  inset: 0;
+  transition:
+    opacity 650ms ease,
+    transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cinema-chaos > svg {
+  position: absolute;
+  inset: 3rem;
+  width: calc(100% - 6rem);
+  height: calc(100% - 6rem);
+  overflow: visible;
+  fill: none;
+}
+
+.cinema-preview-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(24rem, calc(100% - 4rem));
+  padding: 2rem;
+  text-align: center;
+  background: color-mix(in oklch, var(--ink), transparent 17%);
+  border: 1px solid color-mix(in oklch, white, transparent 84%);
+  border-radius: 1.25rem;
+  box-shadow: 0 1.5rem 4rem oklch(0.08 0.02 260 / 0.28);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(10px);
+}
+
+.cinema-preview-empty > span {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cinema-lime);
+}
+
+.cinema-preview-empty h3 {
+  max-width: 12ch;
+  margin: 0.7rem auto 0;
+  font-size: clamp(1.55rem, 2.7vw, 2.15rem);
+  font-weight: 520;
+  line-height: 1.05;
+  letter-spacing: -0.042em;
+  color: white;
+}
+
+.cinema-preview-empty p {
+  margin-top: 0.65rem;
+  font-size: 0.74rem;
+  color: color-mix(in oklch, white, transparent 38%);
+}
+
+.cinema-preview-empty > div {
+  display: grid;
+  grid-template-columns: 1.35fr 0.8fr 1fr;
+  gap: 0.45rem;
+  margin-top: 1.35rem;
+}
+
+.cinema-preview-empty > div i {
+  display: block;
+  height: 0.34rem;
+  background: color-mix(in oklch, white, transparent 78%);
+  border-radius: 999px;
+}
+
+.cinema-path {
+  stroke: color-mix(in oklch, var(--cinema-blue), white 22%);
+  stroke-width: 1.15;
+  stroke-dasharray: 6 9;
+  opacity: 0.56;
+  animation: cinema-stream 9s linear infinite;
+}
+
+.path-two {
+  animation-direction: reverse;
+  animation-duration: 12s;
+}
+
+.path-three {
+  animation-duration: 15s;
+}
+
+.path-four {
+  animation-direction: reverse;
+  animation-duration: 11s;
+}
+
+.cinema-signal-label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, white, transparent 25%);
+  background: color-mix(in oklch, var(--ink), transparent 14%);
+  border: 1px solid color-mix(in oklch, var(--cinema-blue), transparent 45%);
+  border-radius: 999px;
+  box-shadow: 0 0 1.5rem color-mix(in oklch, var(--cinema-blue), transparent 80%);
+  backdrop-filter: blur(10px);
+}
+
+.cinema-signal-label i {
+  width: 0.35rem;
+  aspect-ratio: 1;
+  background: var(--cinema-blue);
+  border-radius: 50%;
+  box-shadow: 0 0 9px var(--cinema-blue);
+}
+
+.signal-audience {
+  top: 17%;
+  left: 12%;
+}
+.signal-offer {
+  top: 27%;
+  right: 13%;
+}
+.signal-voice {
+  right: 20%;
+  bottom: 22%;
+}
+.signal-intent {
+  bottom: 17%;
+  left: 15%;
+}
+
+.cinema-thinking,
+.cinema-status {
+  position: absolute;
+  bottom: 1.35rem;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: color-mix(in oklch, white, transparent 25%);
+  background: color-mix(in oklch, var(--ink), transparent 12%);
+  border: 1px solid color-mix(in oklch, white, transparent 84%);
+  border-radius: 999px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  backdrop-filter: blur(12px);
+}
+
+.cinema-thinking span,
+.cinema-status span {
+  width: 0.38rem;
+  aspect-ratio: 1;
+  background: var(--cinema-blue);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--cinema-blue);
+  animation: cinema-pulse 1.6s ease-in-out infinite;
+}
+
+.cinema-status {
+  z-index: 16;
+  opacity: 0;
+  transition: opacity 400ms ease 650ms;
+}
+
+.cinema-status span {
+  background: var(--cinema-lime);
+  box-shadow: 0 0 10px var(--cinema-lime);
+}
+
+.cinema-result {
+  position: absolute;
+  inset: 3.5rem 2.5rem;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid color-mix(in oklch, white, transparent 60%);
+  border-radius: 1.25rem;
+  box-shadow: 0 2rem 5rem oklch(0.08 0.02 260 / 0.5);
+  opacity: 0;
+  filter: blur(6px);
+  transform: scale(0.82) rotate(-2.5deg) translateY(2rem);
+  transition:
+    opacity 500ms ease 100ms,
+    filter 650ms ease 100ms,
+    transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.is-composed .cinema-chaos {
+  opacity: 0.05;
+  transform: scale(0.7);
+}
+
+.is-composed .cinema-result {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1) rotate(0) translateY(0);
+}
+
+.is-composed .cinema-status {
+  opacity: 1;
+}
+
+.cinema-result-nav {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.8rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+}
+
+.cinema-result-mark {
+  display: grid;
+  width: 1.55rem;
+  aspect-ratio: 1;
+  place-items: center;
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--cinema-lime);
+  border-radius: 0.35rem;
+}
+
+.cinema-result-body {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  flex: 1;
+  gap: 1.25rem;
+  padding: clamp(1.25rem, 3vw, 2.25rem);
+}
+
+.cinema-result-copy {
+  align-self: center;
+}
+
+.cinema-result-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.cinema-result-copy h3 {
+  max-width: 12ch;
+  margin-top: 0.65rem;
+  font-size: clamp(1.55rem, 2.8vw, 2.55rem);
+  font-weight: 550;
+  line-height: 0.98;
+  letter-spacing: -0.052em;
+}
+
+.cinema-result-copy p {
+  max-width: 32ch;
+  margin-top: 0.8rem;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.cinema-result-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.1rem;
+  padding: 0.58rem 0.8rem;
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: white;
+  background: var(--ink);
+  border-radius: 999px;
+}
+
+.cinema-result-focus {
+  position: relative;
+  display: flex;
+  min-height: 15rem;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 1.1rem;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 70% 22%, var(--cinema-lime), transparent 29%),
+    linear-gradient(145deg, oklch(0.91 0.06 235), var(--cinema-blue));
+  border-radius: 1rem;
+}
+
+.cinema-result-focus > span {
+  font-size: 0.54rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cinema-result-focus > strong {
+  font-size: clamp(3.5rem, 7vw, 6.2rem);
+  line-height: 0.85;
+  letter-spacing: -0.1em;
+}
+
+.cinema-result-focus > small {
+  margin-top: 0.5rem;
+  font-size: 0.5rem;
+}
+
+.cinema-result-orbit {
+  position: absolute;
+  top: -3rem;
+  right: -3rem;
+  width: 12rem;
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in oklch, var(--ink), transparent 58%);
+  border-radius: 50%;
+  background: repeating-radial-gradient(
+    circle,
+    transparent 0 8px,
+    color-mix(in oklch, var(--ink), transparent 85%) 9px 10px
+  );
+}
+
+.cinema-result-footer {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--border);
+}
+
+.cinema-result-footer > span {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.5rem;
+  color: var(--muted-foreground);
+  border-right: 1px solid var(--border);
+}
+
+.cinema-result-footer > span:last-child {
+  border-right: 0;
+}
+
+.cinema-result-footer i {
+  display: grid;
+  width: 1.15rem;
+  aspect-ratio: 1;
+  place-items: center;
+  color: var(--ink);
+  background: var(--cinema-lime);
+  border-radius: 50%;
+}
+
+@keyframes cinema-stream {
+  to {
+    stroke-dashoffset: -150;
+  }
+}
+
+@keyframes cinema-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+@media (max-width: 980px) {
+  .cinema-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cinema-copy > p,
+  .cinema-copy form {
+    max-width: 40rem;
+  }
+
+  .cinema-stage {
+    min-height: 36rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .cinema-section {
+    padding-inline: 1rem;
+  }
+
+  .cinema-heading {
+    padding-block: 5rem 3.75rem;
+  }
+
+  .cinema-heading h2 {
+    max-width: 15ch;
+    font-size: clamp(2.35rem, 9.5vw, 3.25rem);
+    line-height: 1;
+  }
+
+  .cinema-input button {
+    width: 2.75rem;
+    padding: 0;
+    justify-content: center;
+    font-size: 0;
+  }
+
+  .cinema-stage {
+    min-height: 31rem;
+    border-radius: 1.4rem;
+  }
+
+  .cinema-result {
+    inset: 2.5rem 1rem;
+  }
+
+  .cinema-result-body {
+    grid-template-columns: 1fr 0.72fr;
+    gap: 0.7rem;
+    padding: 1rem;
+  }
+
+  .cinema-result-focus {
+    min-height: 13rem;
+    padding: 0.7rem;
+  }
+
+  .cinema-result-footer > span {
+    padding: 0.6rem;
+    font-size: 0;
+    justify-content: center;
+  }
+}
+
+/* touch */
+
+/*
+ * The live-preview block on the landing page.
+ *
+ * Its input is a demonstration rather than a form: typing drives the mockup
+ * beside it and submits nowhere, so the section proves the product instead of
+ * competing with the hero for the same click.
+ */
+#cinema-hint {
+  margin-top: 0.65rem;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+}
+
+.cinema-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.4rem;
+  height: 2.75rem;
+  padding-inline: 1.35rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition:
+    transform var(--duration-fast, 150ms) ease,
+    opacity var(--duration-fast, 150ms) ease;
+}
+
+.cinema-cta:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}

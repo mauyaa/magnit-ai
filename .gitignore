@@ -1,0 +1,46 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+# Leading dot: pytest writes `.pytest_cache`, so the undotted spelling this
+# entry used to have matched nothing and the cache was committable.
+.pytest_cache/
+
+# Node / build output
+node_modules/
+dist/
+build/
+.next/
+.output/
+.vinxi/
+.nitro/
+.tanstack/
+.vercel/
+coverage/
+*.tsbuildinfo
+
+# Local state and secrets. `.env.example` is the tracked template and must stay
+# tracked, so the pattern is anchored rather than a bare `.env*`.
+.env
+.env.local
+.env.production
+*.db
+*.db-journal
+
+# Logs are regenerated on every run and one grew to 181KB before this was added.
+*.log
+
+# Generated widget workspaces and scratch dirs
+workspace/
+demo/
+tools/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

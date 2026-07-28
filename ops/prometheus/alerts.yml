@@ -1,0 +1,185 @@
+# Prometheus alerting rules for MagnetAI.
+#
+# Load with:
+#   rule_files:
+#     - /etc/prometheus/alerts.yml
+# Validate before deploying:
+#   promtool check rules ops/prometheus/alerts.yml
+#
+# Every rule carries a runbook_url pointing at the matching section of
+# OPERATIONS.md, so whoever is paged has the procedure in the alert itself.
+#
+# Severity contract:
+#   critical — page a human now; users are affected
+#   warning  — investigate during working hours; degradation or cost risk
+
+groups:
+  - name: magai-availability
+    rules:
+      - alert: MagaiApiDown
+        expr: up{job="magai-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MagnetAI API is not responding"
+          description: "No successful scrape of {{ $labels.instance }} for 2 minutes."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#api-returning-503-database_unavailable"
+
+      - alert: MagaiHighErrorRate
+        # 5xx share of all responses. Recorded over 5m so a single blip is ignored.
+        expr: |
+          sum(rate(magai_http_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(magai_http_requests_total[5m])), 0.001)
+            > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Over 5% of requests are failing"
+          description: "5xx rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#incident-runbook"
+
+      - alert: MagaiLatencyDegraded
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(magai_http_request_duration_seconds_bucket[10m])) by (le, route)
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above 2s on {{ $labels.route }}"
+          description: "p95 is {{ $value | humanizeDuration }}."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#metrics"
+
+  - name: magai-pipeline
+    rules:
+      - alert: MagaiBuildFailureRateHigh
+        expr: |
+          sum(rate(magai_pipeline_builds_total{outcome="failed"}[30m]))
+            /
+          clamp_min(sum(rate(magai_pipeline_builds_total{outcome="started"}[30m])), 0.001)
+            > 0.3
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Widget builds are failing more than 30% of the time"
+          description: >-
+            Usually an upstream model change, an expired MAGAI_GEMINI_API_KEY,
+            or a Vercel deploy failure. Check a failed widget's build_error.
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#builds-stuck-in-building"
+
+      - alert: MagaiNoBuildsCompleting
+        # Builds being started but none finishing points at a stuck worker.
+        expr: |
+          sum(rate(magai_pipeline_builds_total{outcome="started"}[1h])) > 0
+            and
+          sum(rate(magai_pipeline_builds_total{outcome="succeeded"}[1h])) == 0
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Builds are starting but none are completing"
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#builds-stuck-in-building"
+
+      - alert: MagaiBuildsSlow
+        expr: |
+          histogram_quantile(
+            0.95, sum(rate(magai_pipeline_build_duration_seconds_bucket[1h])) by (le)
+          ) > 600
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 build duration above 10 minutes"
+          description: "Approaching the 900s Celery soft time limit, after which builds are killed."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#processes"
+
+  - name: magai-self-heal
+    rules:
+      - alert: MagaiHealSweepSaturated
+        # Consistently hitting the batch ceiling means the sweep cannot keep up and
+        # some widgets are drifting longer than the configured interval.
+        expr: magai_heal_sweep_widgets >= 25
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Self-heal sweep is at its batch limit"
+          description: >-
+            Raise MAGAI_SELF_HEAL_BATCH_SIZE, shorten the interval, or add worker
+            capacity.
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#heal-sweep-not-running"
+
+      - alert: MagaiHealFailuresRising
+        expr: sum(rate(magai_heal_checks_total{result="failed"}[1h])) > 0.05
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Self-heal checks are failing"
+          description: >-
+            Widgets that fail repeatedly back off after MAGAI_SELF_HEAL_MAX_FAILURES
+            and stop being checked until reset.
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#heal-sweep-not-running"
+
+      - alert: MagaiHealSweepNotRunning
+        # Beat is the only scheduler; if it dies, self-healing silently stops and
+        # the product's core promise quietly stops being true.
+        expr: |
+          sum(increase(magai_heal_checks_total[12h])) == 0
+        for: 12h
+        labels:
+          severity: critical
+        annotations:
+          summary: "No self-heal checks in 12 hours"
+          description: "Celery beat is probably not running."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#heal-sweep-not-running"
+
+  - name: magai-abuse
+    rules:
+      - alert: MagaiExpensiveEndpointSpike
+        # Each analyze/build call spends real Gemini and Vercel budget.
+        expr: |
+          sum(rate(magai_http_requests_total{route=~".*/(analyze|build|architect-preview)"}[15m]))
+            > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual volume on spend-incurring endpoints"
+          description: "Possible abuse. Identify the account and tighten its rate limits."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#suspected-abuse--cost-spike"
+
+      - alert: MagaiRateLimitingHeavily
+        expr: sum(rate(magai_http_requests_total{status="429"}[10m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained 429 responses"
+          description: >-
+            Either abuse, or limits set too tight for real usage. Check which
+            route and account before loosening.
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#suspected-abuse--cost-spike"
+
+  - name: magai-product
+    rules:
+      - alert: MagaiWidgetsGettingNoTraffic
+        # Deployed widgets recording no views usually means a broken embed rather
+        # than a quiet week — worth a human look.
+        expr: |
+          sum(increase(magai_widget_impressions_total[24h])) == 0
+            and
+          sum(magai_pipeline_builds_total{outcome="succeeded"}) > 0
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No widget impressions in 24 hours"
+          description: "Check that deployed widgets are reachable and the embed snippet is correct."
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#metrics"

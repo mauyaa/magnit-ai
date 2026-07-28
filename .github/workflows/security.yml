@@ -1,0 +1,111 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly: new advisories land against unchanged code, so CI on push is not
+    # sufficient to catch them.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-audit:
+    name: Python · dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: magai-be
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: magai-be/uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Audit installed packages for known advisories
+        run: |
+          uv sync --frozen
+          uv run --with pip-audit pip-audit --strict
+
+  node-audit:
+    name: Node · dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: magai-fe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.11.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: magai-fe/pnpm-lock.yaml
+
+      - name: Audit dependencies
+        # High and critical fail the build; moderate advisories are reported in
+        # the log without blocking, since transitive dev-only findings are common.
+        run: pnpm audit --audit-level high
+
+  secret-scan:
+    name: Repo · secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so a secret committed earlier and later removed is found.
+          fetch-depth: 0
+
+      - name: Fail on committed .env files
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(local|production)$'; then
+            echo "::error::A .env file is tracked in git. Remove it and rotate any credentials it contained."
+            exit 1
+          fi
+
+      - name: Scan history for credential patterns
+        run: |
+          # Deliberately narrow patterns for the providers this project uses, so
+          # the check stays actionable rather than noisy.
+          if git grep -nIE '(sk_live_[0-9a-zA-Z]{20,}|whsec_[0-9a-zA-Z]{20,}|AIza[0-9A-Za-z_-]{30,})' \
+               $(git rev-list --all) -- . ':!*.example' ':!**/SECURITY.md' 2>/dev/null | head -20; then
+            echo "::error::A live-looking API key appears in git history. Rotate it immediately."
+            exit 1
+          fi
+          echo "No credential patterns found."
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          language: ${{ matrix.language }}
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
