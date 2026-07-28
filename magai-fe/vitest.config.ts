@@ -19,6 +19,13 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // Vitest defaults to 5s. Several specs drive real typing through
+    // userEvent, which dispatches a full event sequence per character and is
+    // slow under jsdom — slow enough that adding v8 coverage instrumentation
+    // alone pushed GuidedBuilder past the limit. The work is legitimate, so the
+    // budget is raised rather than the interaction faked, and CI runners are
+    // slower than a dev machine.
+    testTimeout: 15_000,
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

@@ -36,7 +36,15 @@ const WORKSPACE_PATHS = [
   "/login",
 ];
 
-export function renderWorkspaceRoute(Component: FunctionComponent, at: string) {
+/**
+ * @param at    The route path to mount `Component` on, e.g. "/dashboard/leads".
+ * @param entry Where to start history, when that differs from `at`. Screens that
+ *              keep state in the URL — the tool detail page puts its open tab
+ *              there so a tab can be linked to — have to be entered *at* that
+ *              URL, because arriving on a shared link is the case most likely to
+ *              break. `at` stays the bare path so the route still matches.
+ */
+export function renderWorkspaceRoute(Component: FunctionComponent, at: string, entry: string = at) {
   const rootRoute = createRootRoute();
 
   const routes = WORKSPACE_PATHS.map((path) =>
@@ -44,12 +52,15 @@ export function renderWorkspaceRoute(Component: FunctionComponent, at: string) {
       getParentRoute: () => rootRoute,
       path,
       component: path === at ? Component : () => null,
+      // Ad-hoc tree: no schema, so search params pass through as given. The
+      // real route's validateSearch is exercised in its own unit test.
+      validateSearch: (search: Record<string, unknown>) => search,
     }),
   );
 
   const router = createRouter({
     routeTree: rootRoute.addChildren(routes),
-    history: createMemoryHistory({ initialEntries: [at] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   });
 
   // retry:false so a rejected query surfaces as an error state immediately
