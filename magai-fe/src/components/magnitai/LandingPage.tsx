@@ -133,6 +133,65 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/*
+        The one claim a competitor cannot copy this quarter.
+
+        Every other tool in this category generates from a prompt or a URL — that
+        is table stakes now, not a differentiator. None of them keeps watching
+        afterwards. This used to be a subordinate clause in the paragraph above
+        ("when we rebuild it — because you rebranded"), which is where a
+        product's only real moat goes to die.
+
+        The limitation is stated in the same breath as the promise, deliberately.
+        "It repairs itself" invites the reader to imagine it fixes anything, and
+        the first time it does not, the whole claim reads as marketing.
+      */}
+      <section className="scroll-mt-20 border-t border-border bg-secondary/40">
+        <div className="mx-auto max-w-6xl px-6 py-20 lg:px-8">
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            After it ships · Included from Studio
+          </span>
+          <h2 className="text-title mt-5 max-w-[20ch]">
+            Everyone builds you a tool. We keep it from going stale.
+          </h2>
+          <p className="text-body mt-5 max-w-2xl text-muted-foreground">
+            A lead magnet decays quietly. You change your brand, or a deployment stops answering,
+            and the thing sitting on your busiest page is off-brand or broken — usually noticed by a
+            customer, weeks later. Magnitai checks every published tool on a schedule and fixes both
+            without being asked.
+          </p>
+
+          <div className="mt-10 grid gap-px overflow-hidden rounded-[--radius-surface] border border-border bg-border sm:grid-cols-3">
+            {[
+              {
+                title: "It re-reads your site",
+                body: "Colours, heading type and layout are compared against what the tool was built from.",
+              },
+              {
+                title: "It rebuilds on drift",
+                body: "A real change triggers a regenerate and redeploy. The embed address never moves, so your snippet never changes.",
+              },
+              {
+                title: "It republishes if it dies",
+                body: "An unreachable address brings the last known-good build back, without a rebuild.",
+              },
+            ].map((item) => (
+              <div key={item.title} className="bg-card p-6">
+                <h3 className="text-sm font-medium text-foreground">{item.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.body}</p>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-6 max-w-2xl text-sm leading-6 text-muted-foreground">
+            What it deliberately does not do: touch your page. Tools run in a sandboxed iframe, so
+            your CSS cannot reach in and break their layout — and there is nothing there for us to
+            repair. Every check is written to the tool's timeline, including the ones that found
+            nothing.
+          </p>
+        </div>
+      </section>
+
       {/* ---- close ---- */}
       <section id="pricing" className="scroll-mt-20 border-t border-border">
         <div className="mx-auto max-w-6xl px-6 py-20 lg:px-8">

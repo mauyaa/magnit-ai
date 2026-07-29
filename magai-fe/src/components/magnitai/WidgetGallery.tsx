@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { SHOWCASE } from "@/lib/showcase";
+import { DecisionPreview } from "./DecisionPreview";
 import { MarketingFooter } from "./MarketingFooter";
 
 type FormatId = "calculator" | "quiz" | "audit" | "comparison" | "checklist";
@@ -385,9 +387,112 @@ export function WidgetGallery() {
             </div>
           </div>
         </section>
+
+        <PlayableExamples />
       </div>
 
       <MarketingFooter />
     </>
+  );
+}
+
+/**
+ * Three finished tools, playable without a URL and without an account.
+ *
+ * The rest of this page explains five formats. Explaining is not the same as
+ * showing, and a visitor deciding whether to spend a minute of their own site's
+ * time on us is deciding against competitors who lead with hundreds of browsable
+ * templates. These run through `DecisionPreview` — the same component and the
+ * same scoring the builder produces — so playing one is genuinely using the
+ * product rather than watching a mock of it.
+ *
+ * The businesses are generic by design. Dressing an example in a real company's
+ * brand implies a customer who does not exist, and not claiming things we cannot
+ * evidence is the one rule this product is built around.
+ */
+function PlayableExamples() {
+  const [openId, setOpenId] = useState(SHOWCASE[0].id);
+  const open = SHOWCASE.find((example) => example.id === openId) ?? SHOWCASE[0];
+
+  return (
+    <section
+      className="mx-auto max-w-6xl px-6 pb-24 lg:px-8"
+      aria-labelledby="playable-examples-title"
+    >
+      <div className="border-t border-foreground pt-8">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          Finished examples · Nothing to sign up for
+        </span>
+        <h2
+          id="playable-examples-title"
+          className="mt-4 max-w-[18ch] text-balance font-display text-[clamp(2.2rem,4.4vw,3.6rem)] font-normal leading-[0.94] tracking-[-0.05em] text-foreground"
+        >
+          Play one before you give us anything.
+        </h2>
+        <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
+          Each of these is a complete tool of the kind Magnitai builds from a website — real
+          questions, real scoring, a real result at the end. Answer one and see what your visitor
+          would see.
+        </p>
+      </div>
+
+      <div className="mt-9 flex flex-wrap gap-2" role="tablist" aria-label="Example tools">
+        {SHOWCASE.map((example) => {
+          const selected = example.id === open.id;
+          return (
+            <button
+              key={example.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setOpenId(example.id)}
+              className={`rounded-full border px-4 py-2 text-sm transition-colors motion-reduce:transition-none ${
+                selected
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {example.business}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+        <div className="surface p-5 sm:p-6">
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            {open.sector}
+          </span>
+          <h3 className="mt-3 text-xl font-medium tracking-[-0.03em] text-foreground">
+            {open.business}
+          </h3>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{open.reasoning}</p>
+
+          <dl className="mt-6 grid gap-4 border-t border-border pt-5 text-sm">
+            <div>
+              <dt className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                The decision it helps with
+              </dt>
+              <dd className="mt-1 text-foreground">{open.architect.decision?.buyer_question}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                What they get before any email
+              </dt>
+              <dd className="mt-1 text-foreground">{open.architect.decision?.value_before_gate}</dd>
+            </div>
+          </dl>
+
+          <Link to="/build" className="btn btn-primary mt-7 h-10 w-full text-sm">
+            Build this from my website
+            <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
+        </div>
+
+        {/* Keyed so switching examples resets the answers rather than carrying
+            one tool's state into another's questions. */}
+        <DecisionPreview key={open.id} architect={open.architect} />
+      </div>
+    </section>
   );
 }

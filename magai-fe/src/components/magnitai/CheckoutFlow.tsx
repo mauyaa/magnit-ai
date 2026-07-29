@@ -1015,7 +1015,22 @@ export function CheckoutFlow({
           </div>
         )}
 
-        <div className="mt-10 grid gap-6 lg:grid-cols-2">
+        {/*
+          Placed here rather than only on the landing page because this is where
+          the visitor first weighs keeping the thing. They have seen the work; the
+          open question is whether it stays good, and the honest answer to that is
+          the only part of the pitch a competitor cannot match right now.
+        */}
+        <p className="mt-8 flex items-start gap-2.5 rounded-xl border border-border bg-secondary/50 px-4 py-3 text-sm leading-6 text-muted-foreground">
+          <RefreshCw className="mt-0.5 size-4 shrink-0 text-foreground" aria-hidden="true" />
+          <span>
+            Whichever you keep, Magnitai re-reads your site on a schedule and rebuilds the tool if
+            your brand changes or the address stops answering — at the same embed address, so you
+            never touch your page again.
+          </span>
+        </p>
+
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {journey.concepts.map((concept, index) => (
             <ConceptCard
               key={`${concept.blueprint.type}-${index}`}

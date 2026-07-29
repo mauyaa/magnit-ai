@@ -185,6 +185,13 @@ export function DecisionPreview({
                 name="answer"
                 type="number"
                 required
+                // The question is rendered above as display text, which sighted
+                // users read as a label and assistive technology does not
+                // associate with anything. axe rates an unlabelled input
+                // critical, and this is the only free-entry field in every
+                // generated tool — a screen-reader user reaching it heard
+                // "edit, blank".
+                aria-label={activeQuestion.label}
                 min={activeQuestion.minimum ?? undefined}
                 max={activeQuestion.maximum ?? undefined}
                 step={activeQuestion.step ?? "any"}
