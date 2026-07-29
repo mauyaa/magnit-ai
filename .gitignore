@@ -29,6 +29,9 @@ coverage/
 .env.production
 *.db
 *.db-journal
+# Local snapshots taken before regenerating a dev database. Same reasoning as
+# *.db — they are scratch data, and one is 380KB.
+*.db.bak-*
 
 # Logs are regenerated on every run and one grew to 181KB before this was added.
 *.log

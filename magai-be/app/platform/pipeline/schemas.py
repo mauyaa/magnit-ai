@@ -166,6 +166,20 @@ class DecisionQuestion(BaseModel):
     true_score: float = Field(default=100.0, ge=0.0, le=100.0)
     evidence_ref: str | None = Field(default=None, max_length=80)
 
+    @field_validator("true_score", mode="before")
+    @classmethod
+    def _absent_true_score_is_the_default(cls, value: Any) -> Any:
+        """Treat an explicit ``null`` as "not supplied".
+
+        ``true_score`` is only read for boolean questions — see the runtime's
+        ``calculateDecision`` — so on a number or choice question it means
+        nothing, and a model that writes ``"true_score": null`` there is being
+        accurate rather than wrong. Pydantic rejects null for a non-optional
+        float, which failed the whole architect stage over a field that would
+        never have been read. Observed against gemini-3.6-flash.
+        """
+        return 100.0 if value is None else value
+
     @model_validator(mode="after")
     def _validate_input_shape(self) -> "DecisionQuestion":
         if self.input_type == "single_choice" and len(self.options) < 2:
@@ -240,6 +254,57 @@ class DecisionSpec(BaseModel):
     """The product contract shared by preview, codegen, analytics and QA."""
 
     mechanism: Literal["estimate", "diagnose", "advise"]
+
+    @field_validator("mechanism", mode="before")
+    @classmethod
+    def _normalize_mechanism(cls, value: Any) -> Any:
+        """Map the words a model reaches for onto the three we accept.
+
+        The blueprint type leads the prompt, so for an ``audit_tool`` the model
+        answers ``"audit"`` — reasonable, and rejected. This is descriptive
+        metadata that nothing branches on, so failing a build that already cost
+        two model calls over a synonym is the wrong trade.
+
+        Matched on stems rather than whole words, because the variants are
+        morphological: one run answered ``"audit"``, the next ``"recommendation"``.
+        An exact table turns into a bug report per inflection.
+
+        Still a fixed list, not fuzzy matching — anything outside it fails, because
+        an unrecognised mechanism means the model produced something we do not
+        understand, and that should surface rather than be rounded off.
+        """
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in {"estimate", "diagnose", "advise"}:
+            return normalized
+
+        stems = (
+            ("estimat", "estimate"),
+            ("calculat", "estimate"),
+            ("forecast", "estimate"),
+            ("project", "estimate"),
+            ("quantif", "estimate"),
+            ("audit", "diagnose"),
+            ("assess", "diagnose"),
+            ("diagnos", "diagnose"),
+            ("evaluat", "diagnose"),
+            ("scor", "diagnose"),
+            ("quiz", "diagnose"),
+            ("readiness", "diagnose"),
+            ("advis", "advise"),
+            ("recommend", "advise"),
+            ("compar", "advise"),
+            ("checklist", "advise"),
+            ("guid", "advise"),
+            ("plan", "advise"),
+        )
+        for stem, canonical in stems:
+            if normalized.startswith(stem):
+                return canonical
+        return normalized
+
     buyer_question: str = Field(min_length=8, max_length=220)
     value_before_gate: str = Field(min_length=8, max_length=260)
     qualification_goal: str = Field(min_length=5, max_length=260)

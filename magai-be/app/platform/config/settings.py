@@ -41,7 +41,16 @@ class Settings(BaseSettings):
     vercel_api_token: str = ""
     # Stable Flash supports structured output with materially broader quotas
     # than the Pro preview, which can report a zero-request free-tier limit.
-    agy_model: str = "gemini-2.5-flash"
+    #
+    # Pinned to an explicit version, not `gemini-flash-latest`: an alias moving
+    # under a running deployment changes generation behaviour with no code
+    # change and no way to correlate it with a bad build.
+    #
+    # This was `gemini-2.5-flash` until it began returning 404 "no longer
+    # available to new users". The failure was invisible from outside — the
+    # analyzer degrades to `pipeline.fallback` and the request still answers
+    # 200 — so a stale id here silently turns the AI product into a template.
+    agy_model: str = "gemini-3.6-flash"
     # Product economics live in configuration rather than being buried in a
     # checkout function. The launch price includes one generated, deployed tool.
     widget_launch_price_cents: int = 9_900
