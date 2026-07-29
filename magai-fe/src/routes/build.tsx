@@ -89,7 +89,6 @@ function Build() {
       onBuildStart={(widgetId) =>
         navigate({ to: "/build-story/$widgetId", params: { widgetId }, replace: true })
       }
-      onAutopilotReady={() => navigate({ to: "/dashboard", replace: true })}
       onBack={() => navigate({ to: isAuthenticated ? "/dashboard" : "/" })}
     />
   );

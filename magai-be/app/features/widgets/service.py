@@ -44,6 +44,7 @@ from app.features.widgets.schemas import (
 from app.platform.clients.deployment import deploy_directory
 from app.platform.config.settings import settings
 from app.platform.db.session import rows_affected
+from app.platform.observability.metrics import generation_provider_total
 from app.platform.pipeline.engine import analyze as pipeline_analyze
 from app.platform.pipeline.evidence import collect_site_evidence
 from app.platform.pipeline.fallback import grounded_blueprints
@@ -264,15 +265,31 @@ async def _analyze_with_continuity(
     evidence: SiteEvidence,
     brief: CreationBrief | None,
 ) -> BlueprintList:
+    """Propose directions, falling back to deterministic ones if the model is down.
+
+    The fallback is a real feature — a grounded direction is better than an error
+    page — but it is indistinguishable from success at the API boundary, and that
+    is dangerous. A stale model id once returned 404 for every request while this
+    path quietly served templates and answered 200. Nothing outside the log
+    changed, so the product looked healthy while its whole value proposition was
+    switched off.
+
+    Hence the counter: `magai_generation_provider_total{outcome="fallback"}` going
+    non-zero is the alarm, and `ops/prometheus/alerts.yml` treats a sustained
+    fallback rate as an incident rather than routine degradation.
+    """
     try:
-        return await pipeline_analyze(evidence.target_url, evidence, brief)
+        output = await pipeline_analyze(evidence.target_url, evidence, brief)
     except (AntigravityExecutionError, TimeoutError):
         logger.warning(
             "Generation provider unavailable for %s; using grounded directions",
             evidence.domain,
             exc_info=True,
         )
+        generation_provider_total.labels("analyzer", "fallback").inc()
         return grounded_blueprints(evidence, brief)
+    generation_provider_total.labels("analyzer", "model").inc()
+    return output
 
 
 def create_guest_concept_token(

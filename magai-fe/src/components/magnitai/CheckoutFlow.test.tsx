@@ -119,20 +119,25 @@ function concept(title: string) {
 }
 
 function Flow() {
-  return (
-    <CheckoutFlow
-      onBuildStart={vi.fn()}
-      onAutopilotReady={mocks.autopilotReady}
-      onBack={vi.fn()}
-      initialSite="northsidedental.com"
-    />
-  );
+  return <CheckoutFlow onBuildStart={vi.fn()} onBack={vi.fn()} initialSite="northsidedental.com" />;
 }
 
 /** The brief the flow actually posted. */
 function postedBrief() {
   return mocks.post.mock.calls.find(([path]) => path === "/api/widgets/guest-concepts")?.[1]?.brief;
 }
+
+const SITE_READ = {
+  target_url: "https://northsidedental.com",
+  domain: "northsidedental.com",
+  business_name: "Northside Dental",
+  summary: "Family dental care.",
+  pages_read: 3,
+  signals_found: 42,
+  colors: ["#17324d", "#e8b05c"],
+  fonts: ["Inter"],
+  highlights: ["Confident dental care", "New patient appointments from $120."],
+};
 
 const GUEST_RESPONSE = {
   target_url: "https://northsidedental.com",
@@ -143,6 +148,7 @@ const GUEST_RESPONSE = {
 
 function respondToBuildRequests() {
   mocks.post.mockImplementation((path: string) => {
+    if (path === "/api/widgets/read-site") return Promise.resolve(SITE_READ);
     if (path === "/api/widgets/guest-concepts") return Promise.resolve(GUEST_RESPONSE);
     if (path === "/api/widgets/claim-guest") {
       return Promise.resolve({
@@ -203,35 +209,30 @@ describe("CheckoutFlow · AI build", () => {
     await expectNoA11yViolations(container);
   });
 
-  it("opens the account handoff before starting a signed-out direct build", async () => {
+  it("analyses without an account, because every page leading here promises that", async () => {
+    // The landing page says "No account needed to look" and the pricing page
+    // says "Choose before signup". This used to open the signup dialog on the
+    // first click and analyse nothing.
     renderWithRouter(Flow);
     await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
 
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/let magnitai build it/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/add the result to your dashboard/i)).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole("button", { name: /sign up with google/i }),
-    ).toBeInTheDocument();
-    expect(mocks.post).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith(
+        "/api/widgets/guest-concepts",
+        expect.objectContaining({ url: "https://northsidedental.com" }),
+        { anonymous: true },
+      ),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows honest build status without simulated output", async () => {
+  it("shows what it read while the slow half is still running", async () => {
     let finishGuestBuild!: (value: typeof GUEST_RESPONSE) => void;
     mocks.post.mockImplementation((path: string) => {
+      if (path === "/api/widgets/read-site") return Promise.resolve(SITE_READ);
       if (path === "/api/widgets/guest-concepts") {
         return new Promise<typeof GUEST_RESPONSE>((resolve) => {
           finishGuestBuild = resolve;
-        });
-      }
-      if (path === "/api/widgets/claim-guest") {
-        return Promise.resolve({
-          widget_id: "w-ai",
-          blueprints: GUEST_RESPONSE.concepts.map((item) => item.blueprint),
-          selected_index: 0,
-          selected_concept: GUEST_RESPONSE.concepts[0].architect,
-          entitlement_status: "preview",
-          can_build: false,
         });
       }
       return Promise.resolve(null);
@@ -239,36 +240,34 @@ describe("CheckoutFlow · AI build", () => {
 
     const { container } = renderWithRouter(Flow);
     await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
-    await authenticateAutopilot();
 
-    expect(
-      await screen.findByRole("heading", {
-        name: /building the best direction for northsidedental.com/i,
-      }),
-    ).toBeInTheDocument();
+    // The crawl lands in about five seconds against sixty for the directions.
+    // Their own business name and their own headline are the proof that the
+    // wait is doing something; a spinner only asks them to assume it.
+    expect(await screen.findByText(/read northside dental/i)).toBeInTheDocument();
+    expect(screen.getByText(/3 pages · 42 signals/i)).toBeInTheDocument();
+    expect(screen.getByText(/Confident dental care/)).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/finding the strongest direction/i);
-    expect(screen.getByRole("progressbar", { name: /builder journey/i })).toHaveAttribute(
-      "aria-valuenow",
-      "2",
-    );
-    expect(screen.queryByLabelText(/two AI directions being prepared/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/previews will appear/i)).not.toBeInTheDocument();
     await expectNoA11yViolations(container);
 
     finishGuestBuild(GUEST_RESPONSE);
-    await waitFor(() => expect(mocks.autopilotReady).toHaveBeenCalledWith("w-ai"));
+    expect(await screen.findAllByText("Savings calculator")).not.toHaveLength(0);
   });
 
-  it("opens the collaborative brief before asking for an account", async () => {
+  it("a failed read costs the reassurance, not the run", async () => {
+    mocks.post.mockImplementation((path: string) => {
+      if (path === "/api/widgets/read-site") return Promise.reject(new Error("crawl hiccup"));
+      if (path === "/api/widgets/guest-concepts") return Promise.resolve(GUEST_RESPONSE);
+      return Promise.resolve(null);
+    });
     renderWithRouter(Flow);
-    await userEvent.click(await screen.findByRole("button", { name: /build with me/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
 
-    expect(await screen.findByRole("heading", { name: /set the direction/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/what should magnitai build/i)).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findAllByText("Savings calculator")).not.toHaveLength(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("preserves the collaborative brief behind the account gate", async () => {
+  it("shapes a brief without an account too", async () => {
     renderWithRouter(Flow);
     await userEvent.click(await screen.findByRole("button", { name: /build with me/i }));
     await userEvent.type(
@@ -277,10 +276,8 @@ describe("CheckoutFlow · AI build", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: /build my directions/i }));
 
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/save your collaboration/i)).toBeInTheDocument();
-    expect(screen.getByDisplayValue(/workflow savings planner/i)).toBeInTheDocument();
-    expect(mocks.post).not.toHaveBeenCalled();
+    await waitFor(() => expect(postedBrief()?.mode).toBe("guided"));
+    expect(postedBrief().intent).toBe("Create a workflow savings planner");
   });
 
   it("refuses an incomplete website instead of calling the API", async () => {
@@ -303,41 +300,49 @@ describe("CheckoutFlow · AI build", () => {
     });
     renderWithRouter(Flow);
     await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
-    await authenticateAutopilot();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't reach that website.");
   });
 
-  it("claims the strongest direction and hands it to the dashboard after signup", async () => {
+  it("asks for an account only when the visitor keeps a direction", async () => {
+    // Loss aversion is the whole point of gating here rather than earlier: they
+    // have seen the work, so the ask is "keep this", not "trust us".
     renderWithRouter(Flow);
     await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
+    await screen.findAllByText("Savings calculator");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await userEvent.click(
+      (await screen.findAllByRole("button", { name: /choose this direction/i }))[0],
+    );
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("adopts the chosen direction once the account exists", async () => {
+    renderWithRouter(Flow);
+    await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
+    await screen.findAllByText("Savings calculator");
+    await userEvent.click(
+      (await screen.findAllByRole("button", { name: /choose this direction/i }))[0],
+    );
     await authenticateAutopilot();
 
-    await waitFor(() => expect(mocks.autopilotReady).toHaveBeenCalledWith("w-ai"));
-    expect(postedBrief().mode).toBe("autopilot");
-    expect(mocks.post).toHaveBeenCalledWith("/api/widgets/claim-guest", {
-      session_token: "tok",
-      selected_index: 0,
-    });
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith("/api/widgets/claim-guest", {
+        session_token: "tok",
+        selected_index: 0,
+      }),
+    );
   });
 
-  it("lets an existing user sign in before the direct build", async () => {
-    renderWithRouter(Flow);
-    await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
-    const dialog = await screen.findByRole("dialog");
-
-    await userEvent.click(within(dialog).getByRole("button", { name: /^sign in$/i }));
-    expect(
-      within(dialog).getByRole("button", { name: /sign in and continue/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("starts immediately for a user who is already signed in", async () => {
+  it("an already signed-in visitor sees the same two directions", async () => {
     mocks.setAuthenticated(true);
     renderWithRouter(Flow);
     await userEvent.click(await screen.findByRole("button", { name: /build for me/i }));
 
-    await waitFor(() => expect(mocks.autopilotReady).toHaveBeenCalledWith("w-ai"));
+    expect(await screen.findAllByText("Savings calculator")).not.toHaveLength(0);
+    expect(await screen.findAllByText("Readiness quiz")).not.toHaveLength(0);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

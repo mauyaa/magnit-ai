@@ -48,6 +48,7 @@ from app.features.widgets.schemas import (
     ReadinessCheckResponse,
     ReadinessResponse,
     RuntimeConfigResponse,
+    SiteReadResponse,
     ToolTypeListResponse,
     ToolTypeResponse,
     TrackInteractionRequest,
@@ -89,7 +90,7 @@ from app.platform.db.session import async_session_factory, get_async_session
 from app.platform.pipeline.catalog import CATALOG, blueprint_for
 from app.platform.pipeline.engine import run_architect_stage
 from app.platform.pipeline.events import events as pipeline_events
-from app.platform.pipeline.evidence import EvidenceCollectionError
+from app.platform.pipeline.evidence import EvidenceCollectionError, collect_site_evidence
 from app.platform.pipeline.fallback import grounded_architect
 from app.platform.pipeline.schemas import (
     ArchitectOutput,
@@ -101,7 +102,7 @@ from app.platform.pipeline.schemas import (
 from app.platform.security.rate_limit import rate_limit
 from app.platform.security.revocation import is_revoked
 from app.platform.security.tokens import TokenError, decode_token
-from app.platform.security.url_guard import UnsafeTargetURL
+from app.platform.security.url_guard import UnsafeTargetURL, validate_target_url
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +333,60 @@ def _enqueue_build(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="build_queue_unavailable",
         ) from None
+
+
+@router.post(
+    "/read-site",
+    response_model=SiteReadResponse,
+    dependencies=[rate_limit("guest_concepts")],
+)
+async def read_site_endpoint(payload: AnalyzeRequest) -> SiteReadResponse:
+    """Crawl only — the fast half of the first look, answered on its own.
+
+    Shares the guest rate limit with `/guest-concepts` deliberately: it is the
+    same anonymous crawl of a caller-supplied URL, and giving it its own budget
+    would just open a cheaper way to spend the same egress.
+    """
+    try:
+        safe_url = validate_target_url(payload.url)
+        evidence = await collect_site_evidence(safe_url)
+    except (UnsafeTargetURL, EvidenceCollectionError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from None
+
+    return SiteReadResponse(
+        target_url=evidence.target_url,
+        domain=evidence.domain,
+        business_name=evidence.business_name,
+        summary=evidence.summary,
+        pages_read=len(evidence.pages),
+        signals_found=len(evidence.references),
+        colors=evidence.brand.colors[:6],
+        fonts=evidence.brand.fonts[:3],
+        highlights=_distinct_highlights(evidence),
+    )
+
+
+def _distinct_highlights(evidence: SiteEvidence) -> list[str]:
+    """A few different quotes, not the same sentence three times.
+
+    A site's meta description usually repeats its hero heading, so taking the
+    first few references verbatim shows the visitor one sentence twice and
+    reads like a bug rather than a thorough read.
+    """
+    seen: set[str] = set()
+    quotes: list[str] = []
+    for reference in evidence.references:
+        text = reference.text.strip()
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        quotes.append(text)
+        if len(quotes) == 4:
+            break
+    return quotes
 
 
 @router.post(

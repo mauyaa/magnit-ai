@@ -14,10 +14,12 @@ import {
   useClaimGuestConcept,
   useCreateCheckout,
   useGuestConcepts,
+  useReadSite,
   useWidget,
   type ArchitectOutput,
   type CreationBrief,
   type CuratedConcept,
+  type SiteRead,
   type WidgetKind,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -340,7 +342,69 @@ function ConceptCard({
   );
 }
 
-function GenerationState({ domain, mode }: { domain: string; mode: "autopilot" | "guided" }) {
+/**
+ * Proof that the site was read, shown while the slow half runs.
+ *
+ * The crawl lands in about five seconds and the directions take another fifty.
+ * Filling that gap with a spinner asks the visitor to take it on faith; filling
+ * it with their own business name, their own brand colours and their own
+ * headlines shows them. Nothing here is predicted — every value is observed, so
+ * the panel simply does not appear until there is something true to put in it.
+ */
+function SiteReadPanel({ read }: { read: SiteRead }) {
+  return (
+    <section className="mt-9 rounded-[1.15rem] border border-border bg-card p-5 sm:p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="text-sm font-medium text-foreground">
+          Read {read.business_name || read.domain}
+        </h2>
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          {read.pages_read} pages · {read.signals_found} signals
+        </span>
+      </div>
+
+      {read.colors.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Your colours</span>
+          {read.colors.map((color) => (
+            <span
+              key={color}
+              className="size-5 rounded-full border border-foreground/15"
+              style={{ background: color }}
+              title={color}
+            />
+          ))}
+        </div>
+      )}
+
+      {read.fonts.length > 0 && (
+        <p className="mt-2.5 text-xs text-muted-foreground">
+          Your type <span className="text-foreground">{read.fonts.join(", ")}</span>
+        </p>
+      )}
+
+      {read.highlights.length > 0 && (
+        <ul className="mt-4 grid gap-1.5 border-t border-border pt-4">
+          {read.highlights.slice(0, 3).map((line, index) => (
+            <li key={index} className="truncate text-xs text-muted-foreground">
+              “{line}”
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function GenerationState({
+  domain,
+  mode,
+  read,
+}: {
+  domain: string;
+  mode: "autopilot" | "guided";
+  read: SiteRead | null;
+}) {
   const website = domain || "your website";
   const guided = mode === "guided";
   const work = [
@@ -403,6 +467,8 @@ function GenerationState({ domain, mode }: { domain: string; mode: "autopilot" |
               ? "Magnitai is applying your brief to the page and preparing two distinct recommendations for you to compare."
               : "Magnitai is reading the page, matching its brand and choosing the interaction most useful to its visitors."}
           </p>
+
+          {read && <SiteReadPanel read={read} />}
 
           <section className="mt-9 border-y border-border" aria-labelledby="generation-work-title">
             <h2
@@ -646,12 +712,10 @@ function FineTunePanel({
 
 export function CheckoutFlow({
   onBuildStart,
-  onAutopilotReady,
   onBack,
   initialSite,
 }: {
   onBuildStart: (widgetId: string) => void;
-  onAutopilotReady: (widgetId: string) => void;
   onBack: () => void;
   initialSite?: string;
 }) {
@@ -661,20 +725,16 @@ export function CheckoutFlow({
   const [journey, setJourney] = useState<SavedJourney | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [gateOpen, setGateOpen] = useState(false);
-  const [autopilotGateOpen, setAutopilotGateOpen] = useState(false);
   const [autopilotBuilding, setAutopilotBuilding] = useState(false);
-  const [pendingAutopilotUrl, setPendingAutopilotUrl] = useState("");
-  const [guidedGateOpen, setGuidedGateOpen] = useState(false);
+  const [siteRead, setSiteRead] = useState<SiteRead | null>(null);
   const [shaping, setShaping] = useState(false);
   const [siteUrl, setSiteUrl] = useState("");
-  const [pendingGuidedBrief, setPendingGuidedBrief] = useState<GuidedBrief | null>(null);
   const [fineTuning, setFineTuning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const claimStarted = useRef(false);
-  const autopilotStarted = useRef(false);
-  const guidedBuildStarted = useRef(false);
 
   const guestConcepts = useGuestConcepts();
+  const readSite = useReadSite();
   const claimGuest = useClaimGuestConcept();
   const build = useBuildWidget();
   const checkout = useCreateCheckout();
@@ -726,38 +786,43 @@ export function CheckoutFlow({
   }, [claimGuest, hydrated, isAuthenticated, journey]);
 
   /**
-   * Run the hands-off path as one owned workspace operation.
+   * Read the site, then propose directions — without an account.
    *
-   * The analyzer ranks its blueprints, so index zero is the strongest direction.
-   * Claiming it immediately is what turns an anonymous result into a durable
-   * dashboard record without asking the customer to make another decision.
+   * This used to open the signup dialog first and analyse afterwards, which
+   * contradicted the promise on every page that leads here ("No account needed
+   * to look", "Choose before signup"). Nothing about the analysis needed an
+   * identity: `/read-site` and `/guest-concepts` are both anonymous and rate
+   * limited, and `claim-guest` already carries the result across the account
+   * boundary once there is one. The gate belongs at "keep this", not at "look".
+   *
+   * The read is awaited separately from the directions on purpose. It returns in
+   * about five seconds against roughly sixty for the whole call, so the interval
+   * that used to be a blank screen now shows the visitor their own business
+   * name, their own brand colours and their own headlines — evidence that the
+   * site was genuinely read, rather than a spinner asking them to believe it.
    */
-  const buildAutopilot = useCallback(
-    async (url: string) => {
+  const previewAnonymously = useCallback(
+    async (url: string, brief: CreationBrief) => {
       setError(null);
       setInput(domainOf(url));
+      setSiteRead(null);
       setAutopilotBuilding(true);
 
       try {
-        const response = await guestConcepts.mutateAsync({
-          url,
-          brief: { ...DEFAULT_BRIEF, mode: "autopilot" },
-        });
-        const claimed = await claimGuest.mutateAsync({
-          sessionToken: response.session_token,
-          selectedIndex: 0,
-        });
-        const next: SavedJourney = {
-          ...response,
-          selectedIndex: claimed.selected_index,
-          widgetId: claimed.widget_id,
-        };
+        // Best-effort: a failed read costs the reassurance, not the run. The
+        // directions call re-crawls anyway, so there is nothing to recover.
+        void readSite
+          .mutateAsync(url)
+          .then(setSiteRead)
+          .catch(() => undefined);
+
+        const response = await guestConcepts.mutateAsync({ url, brief });
+        const next: SavedJourney = { ...response, selectedIndex: null, widgetId: null };
         setJourney(next);
         saveJourney(next);
-        setReviewing(false);
-        setPendingAutopilotUrl("");
         setAutopilotBuilding(false);
-        onAutopilotReady(claimed.widget_id);
+        setShaping(false);
+        setReviewing(true);
       } catch (requestError) {
         setAutopilotBuilding(false);
         setError(
@@ -767,79 +832,24 @@ export function CheckoutFlow({
         );
       }
     },
-    [claimGuest, guestConcepts, onAutopilotReady],
+    [guestConcepts, readSite],
   );
 
-  useEffect(() => {
-    if (!isAuthenticated || !pendingAutopilotUrl || autopilotStarted.current) return;
-    autopilotStarted.current = true;
-    setAutopilotGateOpen(false);
-    void buildAutopilot(pendingAutopilotUrl);
-  }, [buildAutopilot, isAuthenticated, pendingAutopilotUrl]);
-
   function startPath(url: string) {
-    setError(null);
-    setInput(domainOf(url));
-    setPendingAutopilotUrl(url);
-    autopilotStarted.current = false;
-    if (!isAuthenticated) {
-      setAutopilotGateOpen(true);
-      return;
-    }
-    autopilotStarted.current = true;
-    void buildAutopilot(url);
+    void previewAnonymously(url, { ...DEFAULT_BRIEF, mode: "autopilot" });
   }
 
   function customizePath(url: string) {
     setInput(domainOf(url));
     setSiteUrl(url);
     setError(null);
-    setPendingGuidedBrief(null);
-    guidedBuildStarted.current = false;
     setShaping(true);
   }
 
-  const buildGuidedBrief = useCallback(
-    async (brief: GuidedBrief) => {
-      setError(null);
-      try {
-        const response = await guestConcepts.mutateAsync({
-          url: siteUrl,
-          brief: { ...brief, mode: "guided" },
-        });
-        const next: SavedJourney = { ...response, selectedIndex: null, widgetId: null };
-        setJourney(next);
-        saveJourney(next);
-        setPendingGuidedBrief(null);
-        setReviewing(true);
-        setShaping(false);
-      } catch (requestError) {
-        setError(
-          requestError instanceof Error
-            ? requestError.message
-            : "We couldn't build from that brief. Please try again.",
-        );
-      }
-    },
-    [guestConcepts, siteUrl],
-  );
-
-  useEffect(() => {
-    if (!isAuthenticated || !pendingGuidedBrief || guidedBuildStarted.current) return;
-    guidedBuildStarted.current = true;
-    setGuidedGateOpen(false);
-    void buildGuidedBrief(pendingGuidedBrief);
-  }, [buildGuidedBrief, isAuthenticated, pendingGuidedBrief]);
-
   function submitGuidedBrief(brief: GuidedBrief) {
-    setPendingGuidedBrief(brief);
-    guidedBuildStarted.current = false;
-    if (!isAuthenticated) {
-      setGuidedGateOpen(true);
-      return;
-    }
-    guidedBuildStarted.current = true;
-    void buildGuidedBrief(brief);
+    // Same rule as the hands-off path: shaping a brief is still looking, and
+    // looking does not require an account.
+    void previewAnonymously(siteUrl, { ...brief, mode: "guided" });
   }
 
   function handleChoose(index: number) {
@@ -906,13 +916,9 @@ export function CheckoutFlow({
     setJourney(null);
     setInput("");
     setReviewing(false);
-    setAutopilotGateOpen(false);
     setAutopilotBuilding(false);
-    setPendingAutopilotUrl("");
     setShaping(false);
     setSiteUrl("");
-    setPendingGuidedBrief(null);
-    setGuidedGateOpen(false);
     setFineTuning(false);
     setError(null);
     claimStarted.current = false;
@@ -927,8 +933,9 @@ export function CheckoutFlow({
   if (autopilotBuilding || guestConcepts.isPending) {
     return (
       <GenerationState
-        domain={domainOf(normalizeUrl(input))}
+        domain={siteRead?.domain || domainOf(normalizeUrl(input))}
         mode={autopilotBuilding ? "autopilot" : "guided"}
+        read={siteRead}
       />
     );
   }
@@ -942,18 +949,9 @@ export function CheckoutFlow({
           error={error}
           onBack={() => {
             setShaping(false);
-            setPendingGuidedBrief(null);
-            setGuidedGateOpen(false);
             setError(null);
           }}
           onBuild={submitGuidedBrief}
-        />
-        <AuthGateDialog
-          open={guidedGateOpen}
-          onOpenChange={setGuidedGateOpen}
-          intent="guided"
-          conceptTitle={null}
-          domain={domainOf(siteUrl || normalizeUrl(input))}
         />
       </>
     );
@@ -1167,13 +1165,6 @@ export function CheckoutFlow({
         onCustomize={customizePath}
         onClearError={() => setError(null)}
         onBack={onBack}
-      />
-      <AuthGateDialog
-        open={autopilotGateOpen}
-        onOpenChange={setAutopilotGateOpen}
-        intent="autopilot"
-        conceptTitle={null}
-        domain={domainOf(pendingAutopilotUrl || normalizeUrl(input))}
       />
     </>
   );

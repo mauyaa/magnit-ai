@@ -169,6 +169,33 @@ groups:
 
   - name: magai-product
     rules:
+      - alert: MagaiServingTemplatesInsteadOfAI
+        # The most expensive failure this product can have, and the quietest.
+        #
+        # When the model provider errors, the analyzer falls back to
+        # deterministic grounded directions and the request still answers 200.
+        # That is deliberate — a real direction beats an error page — but it
+        # means a dead model id, an expired key or an exhausted quota produces a
+        # product that looks completely healthy while serving templates to every
+        # customer. It has already happened once: a retired model returned 404
+        # for every request and only a WARNING in the log said so.
+        #
+        # Any sustained fallback is an incident, so the threshold is deliberately
+        # near zero rather than a percentage of traffic.
+        expr: |
+          sum(rate(magai_generation_provider_total{outcome="fallback"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Analysis is falling back to templates — the AI is not running"
+          description: >-
+            Check MAGAI_AGY_MODEL against the provider's current model list, then
+            the API key and its quota. Retired model ids return 404 while still
+            appearing in the models listing, so probe with a real generateContent
+            call rather than trusting the catalogue.
+          runbook_url: "https://github.com/mauyaa/magnit-ai/blob/main/OPERATIONS.md#metrics"
+
       - alert: MagaiWidgetsGettingNoTraffic
         # Deployed widgets recording no views usually means a broken embed rather
         # than a quiet week — worth a human look.

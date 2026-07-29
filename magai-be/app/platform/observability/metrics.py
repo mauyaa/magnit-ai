@@ -97,6 +97,12 @@ pipeline_build_duration_seconds = Histogram(
     buckets=(15, 30, 60, 120, 300, 600, 1200),
 )
 
+generation_provider_total = Counter(
+    "magai_generation_provider_total",
+    "Whether a generation stage reached the model or fell back to templates.",
+    ["stage", "outcome"],  # outcome: model | fallback
+)
+
 heal_checks_total = Counter(
     "magai_heal_checks_total",
     "Self-heal check outcomes.",

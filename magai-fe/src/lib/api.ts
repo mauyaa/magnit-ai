@@ -670,6 +670,33 @@ export function useAnalyzeUrl() {
   });
 }
 
+export interface SiteRead {
+  target_url: string;
+  domain: string;
+  business_name: string;
+  summary: string;
+  pages_read: number;
+  signals_found: number;
+  colors: string[];
+  fonts: string[];
+  highlights: string[];
+}
+
+/**
+ * The crawl on its own — about five seconds, against roughly sixty for the
+ * directions that follow.
+ *
+ * Split out so the wait has something true in it. A minute of blank screen is
+ * where a first-time visitor leaves, and a spinner does not tell them their site
+ * was read; their own headline and their own brand colours do.
+ */
+export function useReadSite() {
+  return useMutation({
+    mutationFn: (url: string) =>
+      api.post<SiteRead>("/api/widgets/read-site", { url }, { anonymous: true }),
+  });
+}
+
 /** One anonymous first look: two complete, site-specific directions. */
 export function useGuestConcepts() {
   return useMutation({

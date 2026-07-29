@@ -32,6 +32,31 @@ class CuratedConcept(BaseModel):
     architect: ArchitectOutput
 
 
+class SiteReadResponse(BaseModel):
+    """What the crawler found, answered before any model is asked.
+
+    Exists purely to give the visitor something true to look at early. Reading
+    the site takes about five seconds; proposing directions takes another fifty,
+    and a minute of blank screen is where a first-time visitor leaves. Splitting
+    the two lets the interface name the business, show the real brand colours and
+    quote actual headings while the slow half runs.
+
+    Every field is observed, never predicted — the point is to prove the site was
+    genuinely read, so a progress bar with invented milestones would defeat it.
+    """
+
+    target_url: str
+    domain: str
+    business_name: str = ""
+    summary: str = ""
+    pages_read: int = 0
+    signals_found: int = 0
+    colors: list[str] = Field(default_factory=list)
+    fonts: list[str] = Field(default_factory=list)
+    # A few verbatim quotes, so the read is legible rather than a count.
+    highlights: list[str] = Field(default_factory=list, max_length=4)
+
+
 class GuestConceptsResponse(BaseModel):
     target_url: str
     session_token: str
