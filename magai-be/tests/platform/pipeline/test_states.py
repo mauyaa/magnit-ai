@@ -428,10 +428,32 @@ class TestArchitect:
 
         assert result.claims[0].requires_approval is True
 
-    async def test_invented_brand_colour_is_rejected(self):
+    async def test_an_invented_brand_colour_is_snapped_back_not_rejected(self):
+        """Corrected, because a wrong shade is not worth discarding a 45-second build.
+
+        The guarantee still holds — the returned colour is one the crawler saw —
+        but a miss costs a substitution rather than the whole first look.
+        """
         brand = architect_payload()["brand"]
-        with pytest.raises(ValueError, match="invented brand colors"):
-            await self._run(architect_payload(brand={**brand, "accent_color": "#ff00ff"}))
+
+        result = await self._run(architect_payload(brand={**brand, "accent_color": "#ff00ff"}))
+
+        assert result.brand.accent_color == "#17324d"
+
+    async def test_a_grounded_colour_is_left_alone(self):
+        brand = architect_payload()["brand"]
+
+        result = await self._run(architect_payload(brand={**brand, "accent_color": "#17324d"}))
+
+        assert result.brand.accent_color == "#17324d"
+
+    async def test_an_invented_background_falls_back_to_white(self):
+        """A page painted in the accent is unreadable more often than it is striking."""
+        brand = architect_payload()["brand"]
+
+        result = await self._run(architect_payload(brand={**brand, "background_color": "#ff00ff"}))
+
+        assert result.brand.background_color == "#ffffff"
 
     async def test_shorthand_hex_matches_its_expanded_evidence_colour(self):
         """``#abc`` and ``#aabbcc`` are the same colour; only one is in evidence."""
@@ -456,10 +478,15 @@ class TestArchitect:
 
         assert result.brand.background_color == "#f5f5f5"
 
-    async def test_invented_font_is_rejected(self):
+    async def test_an_invented_font_is_snapped_back_not_rejected(self):
+        """The exact failure that killed a real first look against a live model."""
         brand = architect_payload()["brand"]
-        with pytest.raises(ValueError, match="invented a brand font"):
-            await self._run(architect_payload(brand={**brand, "font_headings": "Comic Sans MS"}))
+
+        result = await self._run(
+            architect_payload(brand={**brand, "font_headings": "Comic Sans MS"})
+        )
+
+        assert result.brand.font_headings == "Inter"
 
     async def test_system_fonts_are_allowed_without_evidence(self):
         brand = architect_payload()["brand"]
@@ -469,14 +496,23 @@ class TestArchitect:
 
         assert result.brand.font_body == "serif"
 
-    async def test_swapping_the_grounded_logo_is_rejected(self):
+    async def test_a_swapped_logo_is_replaced_with_the_real_one(self):
         """A substituted logo URL is an image we would serve on someone's behalf."""
         evidence = make_evidence(logo_url="https://example.com/logo.svg")
         brand = architect_payload()["brand"]
-        with pytest.raises(ValueError, match="changed the grounded logo URL"):
+
+        result = await self._run(
+            architect_payload(brand={**brand, "logo_url": "https://elsewhere.test/logo.svg"}),
+            evidence,
+        )
+
+        assert result.brand.logo_url == "https://example.com/logo.svg"
+
+    async def test_truth_claims_are_still_rejected_outright(self):
+        """The relaxation is scoped to design values; the evidence rules did not move."""
+        with pytest.raises(ValueError, match="unknown evidence"):
             await self._run(
-                architect_payload(brand={**brand, "logo_url": "https://elsewhere.test/logo.svg"}),
-                evidence,
+                architect_payload(decision=decision_payload(evidence_refs=["invented_9"]))
             )
 
     async def test_brandless_site_accepts_any_defaults(self):

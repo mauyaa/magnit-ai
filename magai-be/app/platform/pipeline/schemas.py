@@ -198,19 +198,42 @@ class DecisionQuestion(BaseModel):
                     raise ValueError("number question minimum must be below maximum")
             if self.step is not None and self.step <= 0:
                 raise ValueError("number question step must be positive")
-            if self.default is not None:
-                if isinstance(self.default, bool) or not isinstance(self.default, (int, float)):
-                    raise ValueError("number question default must be numeric")
-                if self.minimum is not None and self.default < self.minimum:
-                    raise ValueError("number question default is below minimum")
-                if self.maximum is not None and self.default > self.maximum:
-                    raise ValueError("number question default is above maximum")
-        elif self.input_type == "single_choice":
-            if self.default is not None and self.default not in self.options:
-                raise ValueError("choice question default must be one of its options")
-        elif self.default is not None and not isinstance(self.default, bool):
-            raise ValueError("boolean question default must be true or false")
+
+        # From here down the field is `default`, which is a *preselection* — a
+        # convenience, not part of the question's meaning. Nothing computes with
+        # it: the runtime scores whatever the visitor actually answers.
+        #
+        # So an unusable default is dropped or clamped rather than raised.
+        # Rejecting it failed the entire architect stage roughly 50 seconds and
+        # two model calls into a build, and the visitor saw a bare 500 — for a
+        # field whose worst case is that the first option is not pre-ticked.
+        # Observed live: gemini-3.6-flash returned a choice default that was not
+        # among the options on three questions of one tool.
+        #
+        # The structural rules above still raise. Those describe what the
+        # question *is*, and getting them wrong produces a broken instrument.
+        self.default = self._usable_default()
         return self
+
+    def _usable_default(self) -> float | str | bool | None:
+        """The supplied default if it can be honoured, otherwise nothing."""
+        if self.default is None:
+            return None
+
+        if self.input_type == "number":
+            if isinstance(self.default, bool) or not isinstance(self.default, (int, float)):
+                return None
+            value = float(self.default)
+            if self.minimum is not None:
+                value = max(value, self.minimum)
+            if self.maximum is not None:
+                value = min(value, self.maximum)
+            return value
+
+        if self.input_type == "single_choice":
+            return self.default if self.default in self.options else None
+
+        return self.default if isinstance(self.default, bool) else None
 
 
 class DecisionResult(BaseModel):

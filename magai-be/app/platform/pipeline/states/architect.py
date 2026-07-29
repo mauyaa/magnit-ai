@@ -7,7 +7,13 @@ import logging
 import re
 from typing import Any
 
-from app.platform.pipeline.schemas import ArchitectOutput, Blueprint, CreationBrief, SiteEvidence
+from app.platform.pipeline.schemas import (
+    ArchitectOutput,
+    Blueprint,
+    BrandExtraction,
+    CreationBrief,
+    SiteEvidence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,32 +57,66 @@ def _validate_grounding(
     if any(not claim.evidence_ref and not claim.requires_approval for claim in output.claims):
         raise ValueError("ungrounded claims must require customer approval")
 
-    evidence_colors = {_color(value) for value in evidence.brand.colors}
-    if evidence_colors:
-        output_colors = {
-            _color(output.brand.primary_color),
-            _color(output.brand.secondary_color),
-            _color(output.brand.background_color),
-            _color(output.brand.accent_color),
-        }
-        invented = output_colors - evidence_colors - _NEUTRAL_COLORS
-        if invented:
-            raise ValueError(f"architect output invented brand colors: {sorted(invented)}")
+    return output.model_copy(update={"brand": _ground_brand(output.brand, evidence)})
 
-    evidence_fonts = {font.strip().casefold() for font in evidence.brand.fonts}
-    output_fonts = {
-        output.brand.font_headings.strip().casefold(),
-        output.brand.font_body.strip().casefold(),
-    }
-    if evidence_fonts and output_fonts - evidence_fonts - _SYSTEM_FONTS:
-        raise ValueError("architect output invented a brand font")
-    if (
-        evidence.brand.logo_url
-        and output.brand.logo_url
-        and output.brand.logo_url != evidence.brand.logo_url
-    ):
-        raise ValueError("architect output changed the grounded logo URL")
-    return output
+
+def _ground_brand(brand: BrandExtraction, evidence: SiteEvidence) -> BrandExtraction:
+    """Force every brand value back onto something the crawler actually saw.
+
+    Corrected rather than rejected, which is a deliberate change of posture.
+
+    The guarantee is unchanged: a widget never displays a colour, font or logo
+    that is not the site's. What changed is the cost of a miss. A brand value is
+    a *design* choice, not a claim about the business — nobody is misled by the
+    wrong shade of blue the way they are by an invented statistic — and raising
+    here discarded a whole first look, two model calls deep, roughly 45 seconds
+    in, and surfaced to the visitor as an opaque 500. Observed against
+    gemini-3.6-flash on an ordinary marketing site: the model returned a font
+    outside the crawled set and the entire preview died.
+
+    The strict rules above still raise: evidence citations, ungrounded claims,
+    the approved widget type and the decision spec are all statements about the
+    business, and a wrong one is worse than no answer at all.
+
+    Substitution follows what the system prompt already asks the model to do —
+    use a grounded value, or an accessible neutral when none exists.
+    """
+    evidence_colors = [_color(value) for value in evidence.brand.colors]
+    evidence_fonts = [font.strip() for font in evidence.brand.fonts if font.strip()]
+    corrections: dict[str, str | None] = {}
+
+    if evidence_colors:
+        allowed = set(evidence_colors) | _NEUTRAL_COLORS
+        # Background falls back to white rather than the brand colour: a page
+        # painted in the accent is unreadable far more often than it is striking.
+        fallbacks = {
+            "primary_color": evidence_colors[0],
+            "secondary_color": evidence_colors[1] if len(evidence_colors) > 1 else "#555555",
+            "background_color": "#ffffff",
+            "accent_color": evidence_colors[-1],
+        }
+        for field, fallback in fallbacks.items():
+            if _color(getattr(brand, field)) not in allowed:
+                corrections[field] = fallback
+
+    if evidence_fonts:
+        allowed_fonts = {font.casefold() for font in evidence_fonts} | _SYSTEM_FONTS
+        for field in ("font_headings", "font_body"):
+            if getattr(brand, field).strip().casefold() not in allowed_fonts:
+                corrections[field] = evidence_fonts[0]
+
+    # A substituted logo would be someone else's mark served under this brand,
+    # so it is dropped rather than swapped for a guess.
+    if evidence.brand.logo_url and brand.logo_url != evidence.brand.logo_url:
+        corrections["logo_url"] = evidence.brand.logo_url
+
+    if corrections:
+        logger.info(
+            "Architect: snapped %s back to grounded values",
+            ", ".join(sorted(corrections)),
+        )
+        return brand.model_copy(update=corrections)
+    return brand
 
 
 ARCHITECT_SYSTEM_PROMPT = """You are a senior B2B conversion strategist, UX architect,
