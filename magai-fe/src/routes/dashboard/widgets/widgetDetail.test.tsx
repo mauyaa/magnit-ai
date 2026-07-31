@@ -56,7 +56,12 @@ function widget(over: Record<string, unknown> = {}) {
     target_url: "https://northside.example/",
     widget_type: "roi_calculator",
     status: "active",
-    deployment_url: "https://magai-widget-abcdef12.vercel.app",
+    // Two different addresses on purpose. `deployment_url` is this one build and
+    // changes every publish; `embed_url` is what is pasted on the customer's own
+    // website and must not. Anywhere the owner is shown "your tool", it has to
+    // be the second one.
+    deployment_url: "https://magai-widget-abcdef12-9f8e7d6.vercel.app",
+    embed_url: "https://magai-widget-abcdef12.vercel.app",
     embed_code: '<iframe src="https://magai-widget-abcdef12.vercel.app"></iframe>',
     leads_count: 1,
     // The live panel falls back to these while the funnel query is in flight,
@@ -65,6 +70,14 @@ function widget(over: Record<string, unknown> = {}) {
     starts_count: 64,
     completions_count: 40,
     cta_clicks_count: 7,
+    widget_logic: {
+      decision: {
+        buyer_question: "What could missed bookings be costing this practice?",
+        value_before_gate: "A monthly recovered-bookings estimate with its assumptions shown",
+        qualification_goal: "Practice size and whether missed calls are measured",
+        recommended_placement: "New patients page",
+      },
+    },
     build_stage: null,
     build_progress: null,
     build_error: null,
@@ -234,6 +247,17 @@ describe("widget detail · overview", () => {
     expect(screen.getAllByText("120").length).toBeGreaterThan(0);
   });
 
+  it("keeps the commercial reason for the tool visible after it is built", async () => {
+    renderWorkspaceRoute(WidgetDetailRoute, PATH);
+
+    expect(
+      await screen.findByRole("heading", { name: /job this tool was built to do/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/what could missed bookings be costing/i)).toBeInTheDocument();
+    expect(screen.getByText(/monthly recovered-bookings estimate/i)).toBeInTheDocument();
+    expect(screen.getByText(/new patients page/i)).toBeInTheDocument();
+  });
+
   it("embeds the live tool in a sandboxed frame", async () => {
     const { container } = renderWorkspaceRoute(WidgetDetailRoute, PATH);
 
@@ -249,6 +273,7 @@ describe("widget detail · overview", () => {
       detail: widget({
         status: "building",
         deployment_url: null,
+        embed_url: null,
         build_stage: "codegen",
         build_progress: 65,
       }),
@@ -260,15 +285,18 @@ describe("widget detail · overview", () => {
   });
 
   it("offers a way forward when the tool was never published", async () => {
-    respondWith({ detail: widget({ status: "analyzed", deployment_url: null }) });
+    respondWith({ detail: widget({ status: "analyzed", deployment_url: null, embed_url: null }) });
     renderWorkspaceRoute(WidgetDetailRoute, PATH);
 
     expect(await screen.findByText("Not published yet")).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: /continue building/i })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /continue building/i })).toHaveAttribute(
+      "href",
+      `/build?resume=${WIDGET_ID}`,
+    );
   });
 
   it("marks a failed build as needing attention", async () => {
-    respondWith({ detail: widget({ status: "failed", deployment_url: null }) });
+    respondWith({ detail: widget({ status: "failed", deployment_url: null, embed_url: null }) });
     renderWorkspaceRoute(WidgetDetailRoute, PATH);
 
     expect(await screen.findByText("Needs attention")).toBeInTheDocument();
@@ -416,6 +444,23 @@ describe("widget detail · embed", () => {
 
     expect(await screen.findByText(/magai-widget-abcdef12\.vercel\.app/)).toBeInTheDocument();
   });
+
+  it("never puts one build's URL on the customer's website", async () => {
+    /*
+     * The failure this guards against is invisible from our side. The snippet
+     * lives on a page we cannot edit; if it carries the URL of a single build,
+     * that page keeps serving that build after every rebuild and repair, and
+     * nothing here ever reports a problem. The two addresses are deliberately
+     * different in the fixture so this can actually fail.
+     */
+    const { container } = renderWorkspaceRoute(WidgetDetailRoute, PATH, `${PATH}?tab=embed`);
+
+    await screen.findByText(/magai-widget-abcdef12\.vercel\.app/);
+    const snippet = container.querySelector("code")?.textContent ?? "";
+
+    expect(snippet).toContain("https://magai-widget-abcdef12.vercel.app");
+    expect(snippet).not.toContain("9f8e7d6");
+  });
 });
 
 describe("widget detail · accessibility", () => {
@@ -424,7 +469,7 @@ describe("widget detail · accessibility", () => {
     // iframe under jsdom ("Respondable target must be a frame in the current
     // window"), and the iframe's own contents are a separately deployed page
     // that this suite could not audit meaningfully anyway.
-    respondWith({ detail: widget({ status: "analyzed", deployment_url: null }) });
+    respondWith({ detail: widget({ status: "analyzed", deployment_url: null, embed_url: null }) });
     const { container } = renderWorkspaceRoute(WidgetDetailRoute, PATH);
 
     await screen.findByRole("heading", { name: /recovered bookings calculator/i });

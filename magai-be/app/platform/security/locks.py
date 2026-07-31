@@ -14,6 +14,7 @@ Correctness properties:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable
@@ -36,6 +37,7 @@ end
 """
 
 _pool: aioredis.ConnectionPool | None = None
+_process_locks: dict[str, asyncio.Lock] = {}
 
 
 def _redis() -> aioredis.Redis:
@@ -52,6 +54,26 @@ def _redis() -> aioredis.Redis:
 
 class LockNotAcquired(Exception):
     """Another holder owns the lock; the caller should skip this item."""
+
+
+@asynccontextmanager
+async def process_lock(name: str) -> AsyncIterator[None]:
+    """Hold a lock inside this API process.
+
+    This is intentionally not a Redis fallback. It is used only by the explicit
+    development-local build runner, where all builds live in one process. The
+    production worker path always uses :func:`distributed_lock`.
+    """
+    lock = _process_locks.setdefault(name, asyncio.Lock())
+    if lock.locked():
+        raise LockNotAcquired(name)
+
+    await lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+        _process_locks.pop(name, None)
 
 
 @asynccontextmanager

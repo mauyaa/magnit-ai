@@ -33,7 +33,7 @@ const TOPICS: Array<{
   {
     icon: Rocket,
     title: "Getting your first tool live",
-    body: "Enter your website, choose one of the two directions Magnitai proposes, then paste the embed snippet onto the page it belongs on. The launch checklist on each tool tells you what is still missing.",
+    body: "Enter your website, choose one of the two lead magnets Magnitai proposes, then paste the embed snippet onto the page it belongs on. The launch checklist on each tool tells you what is still missing.",
     to: "/build",
     linkLabel: "Build a tool",
   },
@@ -103,7 +103,7 @@ function Help() {
             </span>
             <h2 className="mt-3.5 text-base font-medium text-foreground">Talk to us</h2>
             <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-              {priority
+              {priority && entitlements?.plan.id !== "free"
                 ? "Your plan includes priority support, so your message goes to the front of the queue."
                 : "Send us what you are stuck on and we will come back to you."}
             </p>

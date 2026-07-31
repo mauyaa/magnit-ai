@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { saveJourney, type SavedJourney } from "@/lib/journey-storage";
+import { expectNoA11yViolations } from "@/test/a11y";
 import { renderWorkspaceRoute } from "@/test/workspace";
 
 /** As in leads.test.tsx: mock the HTTP layer so React Query stays real. */
@@ -77,10 +78,12 @@ function widget(over: Record<string, unknown> = {}) {
   };
 }
 
-function respond(widgets: unknown[]) {
+function respond(
+  widgets: unknown[],
+  analytics: Record<string, unknown> = { daily: [], totals: null },
+) {
   mocks.get.mockImplementation((path: string) => {
-    if (path.startsWith("/api/widgets/portfolio/analytics"))
-      return Promise.resolve({ daily: [], totals: null });
+    if (path.startsWith("/api/widgets/portfolio/analytics")) return Promise.resolve(analytics);
     if (path === "/api/widgets") return Promise.resolve({ widgets });
     if (path === "/api/payments/subscription") return Promise.resolve(null);
     return Promise.resolve(null);
@@ -112,6 +115,24 @@ describe("dashboard overview route", () => {
     renderWorkspaceRoute(DashboardRoute, "/dashboard");
 
     expect(await screen.findByText(/1 of 2 tools live/i)).toBeInTheDocument();
+  });
+
+  it("translates funnel counts into a plain business outcome", async () => {
+    const daily = Array.from({ length: 60 }, (_, index) => ({
+      date: `2026-06-${String((index % 30) + 1).padStart(2, "0")}`,
+      starts: index >= 30 ? 2 : 0,
+      completions: index >= 30 ? 1 : 0,
+      leads: index >= 30 && index < 36 ? 1 : 0,
+      cta_clicks: index >= 30 && index < 40 ? 1 : 0,
+    }));
+    respond([widget()], { daily, totals: null });
+
+    renderWorkspaceRoute(DashboardRoute, "/dashboard");
+
+    expect(
+      await screen.findByRole("heading", { name: /6 people became leads in the last 30 days/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/60 started a tool, 30 reached a result/i)).toBeInTheDocument();
   });
 
   it("invites a first website when nothing is built", async () => {
@@ -149,6 +170,92 @@ describe("dashboard overview route", () => {
     renderWorkspaceRoute(DashboardRoute, "/dashboard");
 
     expect(await screen.findByText(/stopped responding/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /review and restore/i })).toHaveAttribute(
+      "href",
+      "/dashboard/widgets/w1",
+    );
+  });
+
+  it("turns a live tool with no visitors into a direct embed action", async () => {
+    respond([
+      widget({
+        impressions_count: 0,
+        starts_count: 0,
+        completions_count: 0,
+        leads_count: 0,
+        conversion_rate: null,
+      }),
+    ]);
+    renderWorkspaceRoute(DashboardRoute, "/dashboard");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /put revenue calculator in front of visitors/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /get the embed/i })).toHaveAttribute(
+      "href",
+      "/dashboard/widgets/w1?tab=embed",
+    );
+  });
+
+  it("only recommends changing the opening after a useful traffic sample", async () => {
+    respond([
+      widget({
+        impressions_count: 25,
+        starts_count: 0,
+        completions_count: 0,
+        leads_count: 0,
+        conversion_rate: 0,
+      }),
+    ]);
+    renderWorkspaceRoute(DashboardRoute, "/dashboard");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /visitors see revenue calculator, but do not start/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /edit the opening/i })).toHaveAttribute(
+      "href",
+      "/dashboard/widgets/w1?tab=questions",
+    );
+  });
+
+  it("keeps early data in observation mode instead of presenting noise as insight", async () => {
+    respond([
+      widget({
+        impressions_count: 8,
+        starts_count: 1,
+        completions_count: 0,
+        leads_count: 0,
+        conversion_rate: 0,
+      }),
+    ]);
+    renderWorkspaceRoute(DashboardRoute, "/dashboard");
+
+    expect(
+      await screen.findByRole("heading", { name: /keep sharing revenue calculator/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/but do not start/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the next-action workspace accessible", async () => {
+    respond([
+      widget({
+        impressions_count: 0,
+        starts_count: 0,
+        completions_count: 0,
+        leads_count: 0,
+        conversion_rate: null,
+      }),
+    ]);
+    const { container } = renderWorkspaceRoute(DashboardRoute, "/dashboard");
+
+    await screen.findByRole("heading", {
+      name: /put revenue calculator in front of visitors/i,
+    });
+    await expectNoA11yViolations(container);
   });
 
   it("shows the AI-selected result when a direct build reaches the dashboard", async () => {
@@ -258,7 +365,7 @@ describe("dashboard overview route", () => {
 
     renderWorkspaceRoute(DashboardRoute, "/dashboard");
 
-    expect(await screen.findByText(/your ai-built direction is ready/i)).toBeInTheDocument();
+    expect(await screen.findByText(/your lead magnet is ready/i)).toBeInTheDocument();
     expect(
       screen.getByText(/saved in your workspace for northsidedental\.com/i),
     ).toBeInTheDocument();

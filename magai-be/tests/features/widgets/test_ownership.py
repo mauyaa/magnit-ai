@@ -12,6 +12,8 @@ import pytest
 
 from app.features.leads.models import Lead
 from app.features.widgets.models import Widget, WidgetHealEvent
+from app.features.widgets.service import widget_logic_from_architect
+from app.platform.pipeline.schemas import ArchitectOutput, BrandExtraction, MathLogic, WidgetType
 
 
 async def _make_widget(db, owner, **overrides) -> Widget:
@@ -80,6 +82,46 @@ class TestReadIsolation:
         assert (
             await as_user(other_user).get(f"/api/widgets/{widget.id}/heal-events")
         ).status_code == 404
+
+    async def test_claimed_draft_can_be_resumed_from_server_state(self, as_user, db, user):
+        architect = ArchitectOutput(
+            widget_type=WidgetType.ROI_CALCULATOR,
+            brand=BrandExtraction(
+                primary_color="#123456",
+                secondary_color="#654321",
+                background_color="#ffffff",
+                accent_color="#ff0000",
+                font_headings="Inter",
+                font_body="Inter",
+                tone="direct",
+            ),
+            logic=MathLogic(formula="a*b", variables=[], example_calculation="1*2=2"),
+            copywriting={"headline": "See the return"},
+        )
+        widget = await _make_widget(
+            db,
+            user,
+            status="analyzed",
+            deployment_url=None,
+            brand_tokens=architect.brand.model_dump(mode="json"),
+            visual_language=architect.visual_language.model_dump(mode="json"),
+            widget_logic=widget_logic_from_architect(architect),
+            copywriting=architect.copywriting,
+        )
+
+        response = await as_user(user).get(f"/api/widgets/{widget.id}/build-resume")
+
+        assert response.status_code == 200
+        assert response.json()["concept"]["blueprint"]["title"] == "ROI Calculator"
+        copywriting = response.json()["concept"]["architect"]["copywriting"]
+        assert copywriting["headline"] == "See the return"
+
+    async def test_another_workspace_cannot_resume_a_draft(self, as_user, db, user, other_user):
+        widget = await _make_widget(db, user)
+
+        response = await as_user(other_user).get(f"/api/widgets/{widget.id}/build-resume")
+
+        assert response.status_code == 404
 
 
 class TestMutationIsolation:

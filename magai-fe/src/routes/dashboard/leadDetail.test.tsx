@@ -95,6 +95,33 @@ const DETAIL = {
       tone: "ok",
     },
   ],
+  // Two destinations with different outcomes: the owner's alert landed, the
+  // CRM did not. "We captured it" and "your CRM has it" are separate claims and
+  // the screen has to keep them separate.
+  deliveries: [
+    {
+      id: "d1",
+      channel: "owner_email",
+      provider: null,
+      status: "delivered",
+      attempts: 1,
+      last_error: null,
+      next_attempt_at: null,
+      delivered_at: "2026-07-20T10:25:00Z",
+      retryable: false,
+    },
+    {
+      id: "d2",
+      channel: "integration",
+      provider: "hubspot",
+      status: "failed",
+      attempts: 5,
+      last_error: "invalid_token",
+      next_attempt_at: null,
+      delivered_at: null,
+      retryable: true,
+    },
+  ],
 };
 
 const ENTITLEMENTS = {
@@ -168,6 +195,63 @@ describe("lead detail route", () => {
 
     await waitFor(() => expect(mocks.post).toHaveBeenCalled());
     expect(mocks.post.mock.calls[0][1].body).toBe("Left a voicemail");
+  });
+
+  it("says where the lead reached and where it did not", async () => {
+    /*
+     * "We captured it" and "your CRM has it" are different claims. A business
+     * that relies on the second one has to be able to see which is true — a
+     * single `forwarded` boolean could not tell them, and neither could a
+     * delivery that failed in silence.
+     */
+    renderWorkspaceRoute(LeadDetailRoute, AT);
+
+    expect(await screen.findByText("Delivered to")).toBeInTheDocument();
+    expect(screen.getByText("hubspot")).toBeInTheDocument();
+    expect(screen.getByText(/failed after 5 attempts/i)).toBeInTheDocument();
+    expect(screen.getByText("Delivered")).toBeInTheDocument();
+  });
+
+  it("does not print the provider's error twice on one screen", async () => {
+    // The timeline is the chronology and owns the reason; the panel is the
+    // current state and owns the action. Saying it in both places is how a
+    // screen starts reading as noise rather than as an answer.
+    renderWorkspaceRoute(LeadDetailRoute, AT);
+
+    await screen.findByText("Delivered to");
+    expect(screen.getAllByText("invalid_token")).toHaveLength(1);
+  });
+
+  it("offers another attempt only once the automatic ones are spent", async () => {
+    const user = userEvent.setup();
+    mocks.post.mockResolvedValue({ ...DETAIL.deliveries[1], status: "pending", attempts: 0 });
+    renderWorkspaceRoute(LeadDetailRoute, AT);
+
+    // One retry button, for the one delivery that has stopped trying.
+    const retry = await screen.findByRole("button", { name: /retry/i });
+    await user.click(retry);
+
+    await waitFor(() => expect(mocks.post).toHaveBeenCalled());
+    // The lead id comes from the route params, which this harness leaves
+    // unresolved; what matters is that the right delivery is the one retried.
+    expect(mocks.post.mock.calls[0][0]).toMatch(/\/deliveries\/d2\/retry$/);
+  });
+
+  it("marks a new lead contacted when the owner emails them", async () => {
+    /*
+     * Opening the mail client and recording the follow-up are the same act.
+     * Apart, the pipeline only reflected the follow-ups someone remembered to
+     * log by hand — so "New" stopped meaning anything and the queue stopped
+     * being worth opening.
+     */
+    const user = userEvent.setup();
+    mocks.patch.mockResolvedValue({ ...DETAIL.lead, status: "contacted" });
+    renderWorkspaceRoute(LeadDetailRoute, AT);
+
+    await user.click(await screen.findByRole("link", { name: /email them/i }));
+
+    await waitFor(() => expect(mocks.patch).toHaveBeenCalled());
+    expect(mocks.patch.mock.calls[0][1].status).toBe("contacted");
   });
 
   it("hides the pipeline controls when the plan excludes them", async () => {

@@ -9,6 +9,7 @@ import {
   type WidgetData,
 } from "@/lib/api";
 import { PlanGate } from "@/lib/plan";
+import { SaveConfirmation } from "./SaveConfirmation";
 
 const FIELD =
   "h-10 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground outline-none placeholder:text-n-400 focus:border-foreground/40";
@@ -442,11 +443,7 @@ function QuestionEditorBody({ widget }: { widget: WidgetData }) {
           {dirty && !save.isPending && data?.editable !== false && (
             <span className="text-xs text-muted-foreground">Unsaved changes</span>
           )}
-          {!dirty && save.isSuccess && (
-            <span aria-live="polite" className="text-xs text-success">
-              Live on your tool now
-            </span>
-          )}
+          {!dirty && save.isSuccess && <SaveConfirmation widget={widget} />}
           {save.isError && (
             <p role="alert" className="flex items-center gap-1.5 text-xs text-destructive">
               <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />

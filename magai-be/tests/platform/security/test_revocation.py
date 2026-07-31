@@ -21,6 +21,7 @@ class FakeRedis:
         self.store: dict[str, str] = {}
         self.ttls: dict[str, int] = {}
         self.fail = fail
+        self.exists_calls = 0
 
     async def setex(self, key: str, ttl: int, value: str) -> None:
         if self.fail:
@@ -29,6 +30,7 @@ class FakeRedis:
         self.ttls[key] = ttl
 
     async def exists(self, key: str) -> int:
+        self.exists_calls += 1
         if self.fail:
             raise ConnectionError("redis down")
         return 1 if key in self.store else 0
@@ -38,6 +40,7 @@ class FakeRedis:
 def fake_redis(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(revocation, "_redis", lambda: fake)
+    monkeypatch.setattr(revocation, "_redis_retry_after", 0.0)
     return fake
 
 
@@ -45,6 +48,7 @@ def fake_redis(monkeypatch):
 def broken_redis(monkeypatch):
     fake = FakeRedis(fail=True)
     monkeypatch.setattr(revocation, "_redis", lambda: fake)
+    monkeypatch.setattr(revocation, "_redis_retry_after", 0.0)
     return fake
 
 
@@ -89,6 +93,12 @@ class TestFailsOpen:
         account cannot be resurrected by a cache outage.
         """
         assert await revocation.is_revoked("jti-5") is False
+
+    async def test_an_outage_is_not_retried_for_every_parallel_page_request(self, broken_redis):
+        assert await revocation.is_revoked("jti-a") is False
+        assert await revocation.is_revoked("jti-b") is False
+
+        assert broken_redis.exists_calls == 1
 
     async def test_a_failed_revoke_is_swallowed_so_logout_still_succeeds(self, broken_redis):
         # No exception: the user is signed out client-side either way, and the

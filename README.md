@@ -1,10 +1,15 @@
-# MagnetAI
+# Magnitai
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/api-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 
 Turn a business website into an interactive lead-capture widget. Enter a URL, pick
 one of three AI-proposed widget ideas, review and adjust the extracted brand, and
 get an embeddable calculator, quiz, or audit tool deployed to its own URL.
 
-The differentiator is what happens afterwards: MagnetAI re-checks each live widget
+The differentiator is what happens afterwards: Magnitai re-checks each live widget
 on a schedule and repairs it automatically when the source site rebrands or the
 deployment goes unreachable.
 
@@ -304,7 +309,7 @@ cd magai-be && uv run pytest
 cd magai-fe && pnpm test
 ```
 
-509 backend tests and 145 frontend tests. The backend suite runs against
+841 backend tests and 278 frontend tests. The backend suite runs against
 in-memory SQLite (models use dialect-portable column types) and stubs Redis, so
 it needs no running services. Lint and types:
 
@@ -338,3 +343,11 @@ Redis, Celery, Argon2id, PyJWT, Prometheus
 **AI** — Google Antigravity SDK, Gemini
 **Frontend** — React 19, TanStack Start + Router + Query, Tailwind 4, Radix, Vite
 **Tooling** — uv, ruff, mypy, pytest, pnpm, ESLint, Vitest, Docker, GitHub Actions
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE). Note that Magnitai calls third-party
+services — Google Gemini and Vercel — under their own terms; the MIT grant covers
+this source, not those.

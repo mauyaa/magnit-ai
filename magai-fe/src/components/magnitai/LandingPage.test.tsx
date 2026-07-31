@@ -1,4 +1,5 @@
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { expectNoA11yViolations } from "@/test/a11y";
@@ -7,17 +8,6 @@ import { renderWithRouter } from "@/test/router";
 import { LandingPage } from "./LandingPage";
 import { TransparencyDashboard } from "./TransparencyDashboard";
 import { WidgetGallery } from "./WidgetGallery";
-
-/**
- * These three pages are what a stranger sees before they trust anything, and
- * all three previously shipped invented proof: a testimonial from a person who
- * does not exist, a "97.4% confidence" readout, performance multipliers, and
- * model attributions for models the pipeline never calls.
- *
- * Guarding the absence of specific strings is unusual, but a copy edit is
- * exactly how this comes back, and a fabricated statistic is the one bug a
- * reviewer cannot catch by reading the diff.
- */
 
 const FABRICATIONS = [
   /97\.4/,
@@ -41,48 +31,49 @@ function expectNoFabrications(container: HTMLElement) {
 }
 
 describe("LandingPage", () => {
-  it("moves a visitor directly from the promise into the builder", async () => {
+  it("lets a visitor start with their real website from the first screen", async () => {
     renderWithRouter(LandingPage);
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: /start building/i })).toHaveAttribute("href", "/build");
-    expect(screen.getByRole("link", { name: /see how it works/i })).toHaveAttribute(
-      "href",
-      "/how-it-works",
+
+    await userEvent.type(screen.getByLabelText(/your website address/i), "northsidedental.com");
+    await userEvent.click(screen.getByRole("button", { name: /build from my website/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument(),
     );
   });
 
-  it("keeps the website analyzer on the build screen", async () => {
+  it("proves the value exchange before asking for an account", async () => {
     renderWithRouter(LandingPage);
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
 
-    expect(screen.queryByLabelText(/website domain to analyze/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /analyze & build/i })).not.toBeInTheDocument();
-  });
-
-  /**
-   * The live-preview block keeps its input — it drives the mockup while you
-   * type, which is the page's only real proof. What it must not do is submit,
-   * because that made it a second front door onto the journey the hero already
-   * opens, asked half a page apart in different words.
-   */
-  it("keeps the preview demo as a demo, not a second way in", async () => {
-    renderWithRouter(LandingPage);
-    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
-
-    expect(screen.getByLabelText(/type any company name/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /show me/i })).not.toBeInTheDocument();
-
-    // It now offers the same link the hero does, rather than its own form.
-    expect(screen.getByRole("link", { name: /from my real website/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /try finished examples/i })).toHaveAttribute(
       "href",
-      "/build",
+      "/examples",
     );
+    expect(screen.getByText(/preview before signup/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing publishes without you/i)).toBeInTheDocument();
+    expect(screen.getByText(/what the business learns/i)).toBeInTheDocument();
   });
 
-  it("previews the made-and-used output collection on the landing page", async () => {
+  it("rejects an incomplete website before leaving the landing page", async () => {
     renderWithRouter(LandingPage);
-    await waitFor(() => expect(screen.getByText("MADE")).toBeInTheDocument());
-    expect(screen.getByText("USED.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
+
+    await userEvent.type(screen.getByLabelText(/your website address/i), "not-a-website");
+    await userEvent.click(screen.getByRole("button", { name: /build from my website/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/complete website/i);
+    expect(screen.getByLabelText(/your website address/i)).toHaveFocus();
+  });
+
+  it("keeps one dominant URL entry point", async () => {
+    renderWithRouter(LandingPage);
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
+
+    expect(screen.getAllByLabelText(/your website address/i)).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /build from my website/i })).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: /useful for the visitor/i })).toBeInTheDocument();
   });
 
   it("carries no invented metrics, testimonials, or model names", async () => {
@@ -99,9 +90,11 @@ describe("LandingPage", () => {
 });
 
 describe("TransparencyDashboard", () => {
-  it("explains the pipeline without fake telemetry", async () => {
+  it("explains the buyer journey without fake telemetry or pipeline jargon", async () => {
     const { container } = renderWithRouter(TransparencyDashboard);
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
+    expect(screen.getByText(/four steps\. a working outcome/i)).toBeInTheDocument();
+    expect(container).not.toHaveTextContent(/deterministic stages/i);
     expectNoFabrications(container);
   });
 
@@ -113,20 +106,12 @@ describe("TransparencyDashboard", () => {
 });
 
 describe("WidgetGallery", () => {
-  it("lists only the tool types the analyzer can actually choose", async () => {
+  it("opens with playable proof and business context", async () => {
     const { container } = renderWithRouter(WidgetGallery);
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
-    // Mirrors the analyzer prompt's enum: roi_calculator, readiness_quiz,
-    // competitive_comparison, audit_tool, interactive_checklist.
-    for (const name of [
-      /ROI calculator/i,
-      /Readiness quiz/i,
-      /Audit tool/i,
-      /Comparison tool/i,
-      /Interactive checklist/i,
-    ]) {
-      expect(container.textContent).toMatch(name);
-    }
+    expect(screen.getByRole("tablist", { name: /lead magnet examples/i })).toBeInTheDocument();
+    expect(screen.getByText(/visitor decides/i)).toBeInTheDocument();
+    expect(screen.getByText("Business learns")).toBeInTheDocument();
     expectNoFabrications(container);
   });
 

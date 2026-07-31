@@ -4,8 +4,10 @@ import {
   ArrowRight,
   Check,
   Loader2,
+  MapPin,
   RefreshCw,
   SlidersHorizontal,
+  Target,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,8 +15,13 @@ import {
   useBuildWidget,
   useClaimGuestConcept,
   useCreateCheckout,
+  useCreateSubscriptionCheckout,
   useGuestConcepts,
+  usePlans,
   useReadSite,
+  useReconcileCheckout,
+  useResumeBuild,
+  useSubscription,
   useWidget,
   type ArchitectOutput,
   type CreationBrief,
@@ -24,15 +31,22 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
+  clearPendingCheckout,
+  loadPendingCheckout,
+  rememberPendingCheckout,
+} from "@/lib/checkout-storage";
+import {
   journeyDomain,
   loadSavedJourney,
   saveJourney,
   type SavedJourney,
 } from "@/lib/journey-storage";
+import { formatPrice } from "@/lib/plan";
 import { AuthGateDialog } from "./AuthGateDialog";
 import { BuildPathChooser } from "./BuildPathChooser";
 import { DecisionPreview } from "./DecisionPreview";
 import { GuidedBuilder } from "./GuidedBuilder";
+import { VerifyEmailNotice } from "./VerifyEmailNotice";
 
 const KIND_LABELS: Record<WidgetKind, string> = {
   roi_calculator: "Value calculator",
@@ -274,6 +288,60 @@ function PreviewBody({ concept }: { concept: CuratedConcept }) {
   );
 }
 
+/**
+ * The commercial reasoning behind a generated direction.
+ *
+ * The model has always produced these decisions, but the old comparison hid
+ * them behind a visual preview. Owners were being asked to choose the prettier
+ * card without seeing what the tool gives a visitor, where it belongs, or what
+ * it qualifies. Those facts are the product decision.
+ */
+function DirectionStrategy({ concept }: { concept: CuratedConcept }) {
+  const decision = concept.architect.decision;
+
+  return (
+    <section className="mt-5 border-y border-border py-4" aria-label="Why this lead magnet fits">
+      <div className="flex items-start gap-2.5">
+        <Target className="mt-0.5 size-4 shrink-0 text-foreground" aria-hidden="true" />
+        <div>
+          <h3 className="text-xs font-semibold text-foreground">Why this fits</h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {concept.blueprint.rationale}
+          </p>
+        </div>
+      </div>
+
+      {decision ? (
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg bg-secondary/60 px-3 py-2.5">
+            <dt className="text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              Visitor gets
+            </dt>
+            <dd className="mt-1 text-xs leading-5 text-foreground">{decision.value_before_gate}</dd>
+          </div>
+          <div className="rounded-lg bg-secondary/60 px-3 py-2.5">
+            <dt className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              <MapPin className="size-3" aria-hidden="true" />
+              Best placement
+            </dt>
+            <dd className="mt-1 text-xs leading-5 text-foreground">
+              {decision.recommended_placement}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-secondary/60 px-3 py-2.5 sm:col-span-2">
+            <dt className="text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              Helps you identify
+            </dt>
+            <dd className="mt-1 text-xs leading-5 text-foreground">
+              {decision.qualification_goal}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
 function ConceptCard({
   concept,
   index,
@@ -300,7 +368,7 @@ function ConceptCard({
         <div className="flex items-center justify-between gap-4">
           <div>
             <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Direction {String(index + 1).padStart(2, "0")}
+              Option {String(index + 1).padStart(2, "0")}
             </span>
             <h2 className="mt-1.5 text-xl font-medium tracking-[-0.035em] text-foreground">
               {concept.blueprint.title}
@@ -315,11 +383,13 @@ function ConceptCard({
           {concept.blueprint.description}
         </p>
 
+        <DirectionStrategy concept={concept} />
+
         <button
           type="button"
           onClick={onChoose}
           disabled={choosing}
-          className={`mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-colors ${
+          className={`mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-colors ${
             selected
               ? "bg-foreground text-background"
               : "border border-border text-foreground hover:border-foreground/35 hover:bg-secondary"
@@ -329,11 +399,11 @@ function ConceptCard({
             <Loader2 className="size-4 animate-spin" />
           ) : selected ? (
             <>
-              <Check className="size-4" /> Chosen direction
+              <Check className="size-4" /> Chosen lead magnet
             </>
           ) : (
             <>
-              Choose this direction <ArrowRight className="size-4" />
+              Use this lead magnet <ArrowRight className="size-4" />
             </>
           )}
         </button>
@@ -413,7 +483,7 @@ function GenerationState({
       title: guided ? "Two recommendations" : "Best-fit recommendation",
       body: guided
         ? "Two useful conversion approaches with different strategic angles."
-        : "One complete direction selected from the strongest opportunities.",
+        : "One complete lead magnet selected from the strongest opportunities.",
     },
   ];
 
@@ -425,7 +495,7 @@ function GenerationState({
         aria-describedby="generation-description"
       >
         <div className="flex items-center justify-between gap-6 text-[11px] font-medium text-muted-foreground">
-          <span className="uppercase tracking-[0.12em]">AI conversion builder</span>
+          <span className="uppercase tracking-[0.12em]">Lead magnet builder</span>
           <span>Step 2 of 3 · Building</span>
         </div>
         <div
@@ -448,7 +518,7 @@ function GenerationState({
             <span className="grid size-8 place-items-center rounded-full border border-border-strong bg-card">
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             </span>
-            {guided ? "Creating your two directions" : "Finding the strongest direction"}
+            {guided ? "Creating your two lead magnets" : "Finding the strongest lead magnet"}
           </div>
 
           <span className="mt-7 block font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -456,15 +526,15 @@ function GenerationState({
           </span>
           <h1 className="mt-3 max-w-[17ch] font-heading text-[clamp(2.6rem,6vw,4.5rem)] font-medium leading-[0.96] tracking-[-0.055em] text-foreground">
             {guided
-              ? `Building two directions for ${website}.`
-              : `Building the best direction for ${website}.`}
+              ? `Building two lead magnets for ${website}.`
+              : `Building the best lead magnet for ${website}.`}
           </h1>
           <p
             id="generation-description"
             className="mt-5 max-w-[40rem] text-[15px] leading-7 text-muted-foreground sm:text-base"
           >
             {guided
-              ? "Magnitai is applying your brief to the page and preparing two distinct recommendations for you to compare."
+              ? "Magnitai is applying your brief to the page and preparing two complete lead magnets for you to compare."
               : "Magnitai is reading the page, matching its brand and choosing the interaction most useful to its visitors."}
           </p>
 
@@ -504,6 +574,37 @@ function GenerationState({
           </p>
         </main>
       </section>
+    </div>
+  );
+}
+
+function BuilderHydrationState() {
+  return (
+    <div
+      className="mx-auto min-h-[100svh] max-w-[72rem] px-5 pb-20 pt-24 sm:px-6 sm:pt-28 lg:px-8"
+      aria-busy="true"
+    >
+      <div className="mx-auto max-w-[50rem]">
+        <div className="flex items-center justify-between gap-6 text-[11px] font-medium text-muted-foreground">
+          <span className="uppercase tracking-[0.12em]">Lead magnet builder</span>
+          <span>Preparing your workspace</span>
+        </div>
+        <div className="mt-3 h-0.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+          <span className="block h-full w-1/3 animate-pulse rounded-full bg-foreground" />
+        </div>
+        <div
+          role="status"
+          className="mt-16 flex items-center gap-3 text-sm font-medium text-foreground"
+        >
+          <span className="grid size-9 place-items-center rounded-full border border-border-strong bg-card">
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          </span>
+          Opening your builder
+        </div>
+        <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+          Restoring any website or lead magnet you were already working on.
+        </p>
+      </div>
     </div>
   );
 }
@@ -714,10 +815,17 @@ export function CheckoutFlow({
   onBuildStart,
   onBack,
   initialSite,
+  resumeWidgetId,
+  autoStart = false,
+  checkoutReturn,
 }: {
   onBuildStart: (widgetId: string) => void;
   onBack: () => void;
   initialSite?: string;
+  resumeWidgetId?: string;
+  autoStart?: boolean;
+  /** Set when Stripe just sent the customer back here. */
+  checkoutReturn?: "success" | "cancelled";
 }) {
   const { isAuthenticated, user } = useAuth();
   const [hydrated, setHydrated] = useState(false);
@@ -731,17 +839,42 @@ export function CheckoutFlow({
   const [siteUrl, setSiteUrl] = useState("");
   const [fineTuning, setFineTuning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  /** The domain of a draft reopened at the choice, before any concept exists. */
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const claimStarted = useRef(false);
+  const autoStartAttempted = useRef(false);
+  const reconcileAttempted = useRef(false);
 
   const guestConcepts = useGuestConcepts();
   const readSite = useReadSite();
   const claimGuest = useClaimGuestConcept();
   const build = useBuildWidget();
   const checkout = useCreateCheckout();
-  const widget = useWidget(journey?.widgetId ?? "");
+  const subscriptionCheckout = useCreateSubscriptionCheckout();
+  const reconcile = useReconcileCheckout();
+  const planCatalog = usePlans();
+  // The first look is intentionally public. Do not poll a private billing
+  // endpoint until an account actually exists.
+  const subscription = useSubscription(isAuthenticated);
+  const resumeBuild = useResumeBuild(isAuthenticated && resumeWidgetId ? resumeWidgetId : null);
+  const {
+    data: widgetData,
+    isLoading: widgetLoading,
+    refetch: refetchWidget,
+  } = useWidget(journey?.widgetId ?? resumeWidgetId ?? "");
+  const studioPlan = planCatalog.data?.plans.find((plan) => plan.id === "studio");
+  const singleToolPrice =
+    planCatalog.data?.single_tool_price !== undefined
+      ? formatPrice(planCatalog.data.single_tool_price, planCatalog.data.currency)
+      : null;
+  const studioPrice = studioPlan
+    ? formatPrice(studioPlan.monthly_price, studioPlan.currency)
+    : null;
+  const widgetCanBuild = widgetData?.can_build;
 
   useEffect(() => {
-    const saved = loadSavedJourney();
+    const saved = resumeWidgetId ? null : loadSavedJourney();
     setJourney(saved);
     if (saved) {
       setInput(domainOf(saved.target_url));
@@ -750,7 +883,89 @@ export function CheckoutFlow({
       setInput(initialSite.replace(/^https?:\/\//i, ""));
     }
     setHydrated(true);
-  }, [initialSite]);
+  }, [initialSite, resumeWidgetId]);
+
+  useEffect(() => {
+    if (!hydrated || !isAuthenticated || !resumeWidgetId || journey || !resumeBuild.data) {
+      return;
+    }
+
+    if (!resumeBuild.data.concept) {
+      /*
+       * They analysed this site but never chose a direction — the step straight
+       * after the read, and a perfectly ordinary place to stop. There are no
+       * previewable concepts to restore, so the honest continuity is to bring
+       * back the site itself rather than make them find the URL again and
+       * wonder what happened to their draft.
+       */
+      setInput(domainOf(resumeBuild.data.target_url));
+      setSiteUrl(resumeBuild.data.target_url);
+      setResumeNotice(domainOf(resumeBuild.data.target_url));
+      return;
+    }
+
+    const resumed: SavedJourney = {
+      target_url: resumeBuild.data.target_url,
+      session_token: `claimed:${resumeWidgetId}`,
+      concepts: [resumeBuild.data.concept],
+      brief: resumeBuild.data.brief,
+      selectedIndex: 0,
+      widgetId: resumeWidgetId,
+    };
+    setInput(domainOf(resumed.target_url));
+    setJourney(resumed);
+    saveJourney(resumed);
+  }, [hydrated, isAuthenticated, journey, resumeBuild.data, resumeWidgetId]);
+
+  useEffect(() => {
+    if (!resumeBuild.error) return;
+    setError(
+      resumeBuild.error instanceof Error
+        ? resumeBuild.error.message
+        : "We couldn't reopen this lead magnet.",
+    );
+  }, [resumeBuild.error]);
+
+  /*
+   * Settle the checkout the customer just came back from.
+   *
+   * Opening checkout marks the tool pending, and only Stripe could clear that.
+   * A customer who changed their mind on the payment page therefore returned to
+   * a tool they could no longer build, and stayed there until the session
+   * expired — potentially hours. So on the way back we ask the API what really
+   * happened. The webhook is still the authority; this just asks it sooner, and
+   * asks it on cancellation too, which no webhook fires promptly for.
+   */
+  useEffect(() => {
+    if (!checkoutReturn || !isAuthenticated || reconcileAttempted.current) return;
+    const pending = loadPendingCheckout();
+    if (!pending) return;
+    reconcileAttempted.current = true;
+
+    void (async () => {
+      try {
+        const { outcome } = await reconcile.mutateAsync({
+          sessionId: pending.sessionId,
+          kind: pending.kind,
+        });
+        if (outcome === "pending") {
+          // Keep the record: the next return trip can try again.
+          setCheckoutNotice("Payment is still being confirmed. This page updates on its own.");
+          return;
+        }
+        clearPendingCheckout();
+        setCheckoutNotice(
+          outcome === "paid"
+            ? "Payment confirmed. Your tool is ready to build."
+            : "Checkout closed — nothing was charged. Your tool is exactly as you left it.",
+        );
+        await refetchWidget();
+      } catch {
+        // Reconciliation is the fast path, not the only one. If it fails the
+        // webhook still settles this, so say nothing rather than alarm anyone.
+      }
+    })();
+  }, [checkoutReturn, isAuthenticated, reconcile, refetchWidget]);
 
   useEffect(() => {
     if (
@@ -784,6 +999,12 @@ export function CheckoutFlow({
         );
       });
   }, [claimGuest, hydrated, isAuthenticated, journey]);
+
+  useEffect(() => {
+    if (subscription.data?.status === "active" && widgetCanBuild === false) {
+      void refetchWidget();
+    }
+  }, [subscription.data?.status, widgetCanBuild, refetchWidget]);
 
   /**
    * Read the site, then propose directions — without an account.
@@ -835,6 +1056,21 @@ export function CheckoutFlow({
     [guestConcepts, readSite],
   );
 
+  useEffect(() => {
+    if (!hydrated || !autoStart || !initialSite || journey || autoStartAttempted.current) {
+      return;
+    }
+
+    const url = normalizeUrl(initialSite);
+    if (!url) return;
+
+    // The website was already validated on the landing page. Carry that intent
+    // through instead of asking the visitor to approve the same action twice.
+    // The ref also makes this safe under React Strict Mode's repeated effects.
+    autoStartAttempted.current = true;
+    void previewAnonymously(url, { ...DEFAULT_BRIEF, mode: "autopilot" });
+  }, [autoStart, hydrated, initialSite, journey, previewAnonymously]);
+
   function startPath(url: string) {
     void previewAnonymously(url, { ...DEFAULT_BRIEF, mode: "autopilot" });
   }
@@ -878,23 +1114,30 @@ export function CheckoutFlow({
   async function handleBuild() {
     if (!journey?.widgetId || journey.selectedIndex === null) return;
     if (!user?.email_verified) {
-      setError("Check your inbox and verify your email before building.");
+      setError("Confirm your email address first — use Resend above if it never arrived.");
       return;
     }
 
     const selected = journey.concepts[journey.selectedIndex];
     setError(null);
     try {
-      if (widget.data?.entitlement_status === "checkout_pending") {
+      if (widgetData?.entitlement_status === "checkout_pending") {
         setError("Payment is being confirmed. This page will update automatically.");
         return;
       }
-      if (widget.data && !widget.data.can_build) {
-        const origin = window.location.origin;
+      if (widgetData && !widgetData.can_build) {
+        // `resume` carries the tool back even if the tab's saved journey is
+        // gone; `checkout` tells the flow a payment round trip just ended.
+        const back = `${window.location.origin}/build?resume=${journey.widgetId}&checkout=`;
         const session = await checkout.mutateAsync({
           widgetId: journey.widgetId,
-          successUrl: `${origin}/build?checkout=success`,
-          cancelUrl: `${origin}/build?checkout=cancelled`,
+          successUrl: `${back}success`,
+          cancelUrl: `${back}cancelled`,
+        });
+        rememberPendingCheckout({
+          sessionId: session.session_id,
+          kind: "one_time",
+          widgetId: journey.widgetId,
         });
         window.location.assign(session.checkout_url);
         return;
@@ -908,6 +1151,36 @@ export function CheckoutFlow({
       onBuildStart(journey.widgetId);
     } catch (buildError) {
       setError(buildError instanceof Error ? buildError.message : "We couldn't start the build.");
+    }
+  }
+
+  async function handleStudioCheckout() {
+    if (!journey?.widgetId) return;
+    if (!user?.email_verified) {
+      setError("Confirm your email address first — use Resend above if it never arrived.");
+      return;
+    }
+
+    setError(null);
+    try {
+      const back = `${window.location.origin}/build?resume=${journey.widgetId}&checkout=`;
+      const session = await subscriptionCheckout.mutateAsync({
+        plan: "studio",
+        successUrl: `${back}success`,
+        cancelUrl: `${back}cancelled`,
+      });
+      rememberPendingCheckout({
+        sessionId: session.session_id,
+        kind: "subscription",
+        widgetId: journey.widgetId,
+      });
+      window.location.assign(session.checkout_url);
+    } catch (checkoutError) {
+      setError(
+        checkoutError instanceof Error
+          ? checkoutError.message
+          : "We couldn't open the Studio checkout.",
+      );
     }
   }
 
@@ -927,7 +1200,7 @@ export function CheckoutFlow({
   }
 
   if (!hydrated) {
-    return <div className="min-h-screen" />;
+    return <BuilderHydrationState />;
   }
 
   if (autopilotBuilding || guestConcepts.isPending) {
@@ -961,7 +1234,9 @@ export function CheckoutFlow({
     journey?.selectedIndex !== null && journey?.selectedIndex !== undefined
       ? journey.concepts[journey.selectedIndex]
       : null;
-  const showingComparison = Boolean(journey && (!selected || reviewing));
+  const showingComparison = Boolean(
+    journey && (!selected || (reviewing && journey.concepts.length > 1)),
+  );
 
   /*
    * Rendered by both journey screens rather than one.
@@ -990,10 +1265,10 @@ export function CheckoutFlow({
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              {domainOf(journey.target_url)} · 2 ready
+              {domainOf(journey.target_url)} · 2 lead magnets ready
             </span>
             <h1 className="mt-3 max-w-2xl font-heading text-4xl font-medium tracking-[-0.05em] text-foreground sm:text-5xl">
-              Choose your AI-built direction.
+              Choose the lead magnet your visitors will use.
             </h1>
           </div>
           <button
@@ -1015,21 +1290,6 @@ export function CheckoutFlow({
           </div>
         )}
 
-        {/*
-          Placed here rather than only on the landing page because this is where
-          the visitor first weighs keeping the thing. They have seen the work; the
-          open question is whether it stays good, and the honest answer to that is
-          the only part of the pitch a competitor cannot match right now.
-        */}
-        <p className="mt-8 flex items-start gap-2.5 rounded-xl border border-border bg-secondary/50 px-4 py-3 text-sm leading-6 text-muted-foreground">
-          <RefreshCw className="mt-0.5 size-4 shrink-0 text-foreground" aria-hidden="true" />
-          <span>
-            Whichever you keep, Magnitai re-reads your site on a schedule and rebuilds the tool if
-            your brand changes or the address stops answering — at the same embed address, so you
-            never touch your page again.
-          </span>
-        </p>
-
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {journey.concepts.map((concept, index) => (
             <ConceptCard
@@ -1050,15 +1310,21 @@ export function CheckoutFlow({
 
   if (journey && selected) {
     const saving = isAuthenticated && !journey.widgetId;
+    const needsPurchase =
+      Boolean(widgetData) &&
+      !widgetData?.can_build &&
+      widgetData?.entitlement_status !== "checkout_pending";
     return (
       <div className="mx-auto min-h-screen max-w-6xl px-5 pb-24 pt-28 sm:px-6 lg:px-8">
-        <button
-          type="button"
-          onClick={() => setReviewing(true)}
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" /> Review both directions
-        </button>
+        {journey.concepts.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setReviewing(true)}
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" /> Review both lead magnets
+          </button>
+        )}
 
         <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(20rem,0.7fr)]">
           <div className="rounded-[1.7rem] border border-border bg-card p-3 shadow-card">
@@ -1071,12 +1337,16 @@ export function CheckoutFlow({
             }`}
           >
             <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Selected direction
+              Selected lead magnet
             </span>
             <h1 className="mt-3 font-heading text-4xl font-medium tracking-[-0.05em] text-foreground">
               {selected.blueprint.title}
             </h1>
-            <p className="mt-3 text-sm text-muted-foreground">Ready to build.</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Your branded visitor experience is ready to review.
+            </p>
+
+            <DirectionStrategy concept={selected} />
 
             <div className="mt-7 grid grid-cols-3 border-y border-border py-5">
               {[
@@ -1109,7 +1379,7 @@ export function CheckoutFlow({
             >
               <span className="flex items-center gap-2">
                 <SlidersHorizontal className="size-4" />
-                {fineTuning ? "Close fine-tuning" : "Choose the exact details"}
+                {fineTuning ? "Close editor" : "Edit questions and result"}
               </span>
               <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
                 Optional
@@ -1119,6 +1389,17 @@ export function CheckoutFlow({
             {fineTuning && (
               <FineTunePanel architect={selected.architect} onChange={updateSelectedArchitect} />
             )}
+
+            {checkoutNotice && (
+              <p
+                role="status"
+                className="mt-5 rounded-xl border border-border bg-secondary px-4 py-3 text-sm leading-6 text-foreground"
+              >
+                {checkoutNotice}
+              </p>
+            )}
+
+            {user && !user.email_verified && <VerifyEmailNotice email={user.email} />}
 
             {error && (
               <div
@@ -1130,39 +1411,95 @@ export function CheckoutFlow({
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={handleBuild}
-              disabled={
-                saving ||
-                build.isPending ||
-                checkout.isPending ||
-                widget.isLoading ||
-                widget.data?.entitlement_status === "checkout_pending" ||
-                !journey.widgetId
-              }
-              className="group mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand-solid px-6 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-float disabled:pointer-events-none disabled:opacity-55"
-            >
-              {saving || build.isPending || checkout.isPending ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  {saving
-                    ? "Saving your direction"
-                    : checkout.isPending
-                      ? "Opening secure checkout"
-                      : "Starting the build"}
-                </>
-              ) : (
-                <>
-                  {widget.data && !widget.data.can_build
-                    ? widget.data.entitlement_status === "checkout_pending"
+            {needsPurchase ? (
+              <section className="mt-6 rounded-[1.25rem] border border-border bg-card p-4 shadow-card">
+                <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Launch this lead magnet
+                </span>
+                <h2 className="mt-1.5 text-base font-medium text-foreground">
+                  Choose one launch or an ongoing workspace
+                </h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Choose one tool for this launch, or Studio for ongoing lead capture and new tools.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={handleStudioCheckout}
+                  disabled={subscriptionCheckout.isPending}
+                  className="group mt-4 flex min-h-12 w-full items-center justify-between rounded-xl bg-brand-solid px-4 text-left text-sm font-semibold text-white transition hover:bg-brand-hover disabled:pointer-events-none disabled:opacity-55"
+                >
+                  <span>
+                    {subscriptionCheckout.isPending
+                      ? "Opening Studio checkout"
+                      : `Start Studio${studioPrice ? ` · ${studioPrice}/month` : ""}`}
+                    <small className="mt-0.5 block text-[10px] font-normal text-white/75">
+                      {studioPlan
+                        ? `${studioPlan.live_tool_limit} live tools, lead capture and automatic repair`
+                        : "Live tools, lead capture and automatic repair"}
+                    </small>
+                  </span>
+                  {subscriptionCheckout.isPending ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ArrowRight
+                      className="size-4 transition-transform group-hover:translate-x-0.5"
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleBuild}
+                  disabled={checkout.isPending}
+                  className="mt-2 flex min-h-11 w-full items-center justify-between rounded-xl border border-border px-4 text-left text-sm font-medium text-foreground transition hover:border-foreground/30 hover:bg-secondary disabled:pointer-events-none disabled:opacity-55"
+                >
+                  <span>
+                    {checkout.isPending
+                      ? "Opening single-tool checkout"
+                      : `Launch only this tool${singleToolPrice ? ` · ${singleToolPrice} once` : ""}`}
+                  </span>
+                  {checkout.isPending ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ArrowRight className="size-4" aria-hidden="true" />
+                  )}
+                </button>
+              </section>
+            ) : (
+              <button
+                type="button"
+                onClick={handleBuild}
+                disabled={
+                  saving ||
+                  build.isPending ||
+                  checkout.isPending ||
+                  widgetLoading ||
+                  widgetData?.entitlement_status === "checkout_pending" ||
+                  !journey.widgetId
+                }
+                className="group mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand-solid px-6 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-float disabled:pointer-events-none disabled:opacity-55"
+              >
+                {saving || build.isPending || checkout.isPending ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    {saving
+                      ? "Saving your lead magnet"
+                      : checkout.isPending
+                        ? "Opening secure checkout"
+                        : "Starting the build"}
+                  </>
+                ) : (
+                  <>
+                    {widgetData?.entitlement_status === "checkout_pending"
                       ? "Confirming payment"
-                      : "Launch this tool · $99"
-                    : "Build this direction"}
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </>
-              )}
-            </button>
+                      : "Build my lead magnet"}
+                    <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                  </>
+                )}
+              </button>
+            )}
           </aside>
         </div>
         {gate}
@@ -1176,6 +1513,7 @@ export function CheckoutFlow({
         initialSite={input || initialSite}
         pending={autopilotBuilding || guestConcepts.isPending}
         requestError={error}
+        resumedDomain={resumeNotice}
         onStart={startPath}
         onCustomize={customizePath}
         onClearError={() => setError(null)}

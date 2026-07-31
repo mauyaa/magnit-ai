@@ -274,6 +274,20 @@ class TestRuntimeConfig:
         assert body["accepting_leads"] is True
         assert "max-age" in response.headers.get("cache-control", "")
 
+    async def test_deployed_origin_can_fetch_live_owner_edits(self, db, user, client):
+        widget = await _built_widget(db, user)
+        response = await client.options(
+            f"/api/widgets/{widget.id}/runtime-config",
+            headers={
+                "Origin": "https://customer-widget.vercel.app",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 204
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert "GET" in response.headers["access-control-allow-methods"]
+
     async def test_reflects_an_owner_edit_without_a_rebuild(self, db, user, as_user, client):
         widget = await _built_widget(db, user)
         await (as_user(user)).put(

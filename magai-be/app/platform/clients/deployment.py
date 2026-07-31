@@ -33,12 +33,35 @@ async def _disable_sso(project_id: str) -> None:
             logger.warning("Failed to disable SSO for project %s: %s", project_id, resp.text)
 
 
-async def _deploy_vercel(files: list[dict], widget_id: str) -> str:
+def _stable_alias(widget_id: str) -> str:
+    """The tool's permanent hostname, derived from its project name.
+
+    Every deploy for a tool targets the same Vercel project, and a project's
+    production alias always resolves to whatever is currently live in it. That
+    is the property the pasted embed needs: the customer's website keeps working
+    when the tool is rebuilt, repaired or rolled back.
+    """
+    return f"{_project_name(widget_id)}.vercel.app"
+
+
+async def _deploy_vercel(files: list[dict], widget_id: str) -> tuple[str, str, str | None]:
+    """Returns ``(deployment_url, embed_url, deployment_id)``.
+
+    ``deployment_url`` is unique to this build and is what rollback history
+    points at. ``embed_url`` is the project's production alias and is what the
+    customer pastes — the two must never be confused.
+    """
     headers = _vercel_headers()
+    alias = _stable_alias(widget_id)
     payload = {
-        "name": f"magai-widget-{widget_id[:8]}",
+        "name": _project_name(widget_id),
         "files": files,
         "target": "production",
+        # Named explicitly rather than relying on the project's production alias
+        # being assigned by default: the embed on a customer's website resolves
+        # through this hostname, so it has to be part of the deploy request that
+        # can fail loudly, not an implicit side effect.
+        "alias": [alias],
         "projectSettings": {
             "framework": None,
             "devCommand": None,
@@ -67,7 +90,25 @@ async def _deploy_vercel(files: list[dict], widget_id: str) -> str:
         if project_id:
             await _disable_sso(project_id)
 
-        return f"https://{url}"
+        return f"https://{url}", f"https://{alias}", data.get("id")
+
+
+async def promote_deployment(deployment_id: str, widget_id: str) -> None:
+    """Point the tool's permanent hostname at an existing deployment.
+
+    Rollback is only real if the address on the customer's website starts
+    serving the older build. Re-pointing the alias is what makes that true;
+    without it, rollback would change a row in our database and nothing else.
+    """
+    alias = _stable_alias(widget_id)
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            f"https://api.vercel.com/v2/deployments/{deployment_id}/aliases",
+            headers=_vercel_headers(),
+            json={"alias": alias},
+        )
+    if response.status_code not in (200, 201):
+        raise RuntimeError(f"Vercel alias promotion failed: {response.status_code} {response.text}")
 
 
 def _read_dist_files(dist_dir: str) -> list[dict]:
@@ -100,12 +141,23 @@ async def deploy_directory(dist_dir: str, widget_id: str) -> DeploymentResult:
         )
 
     files = await asyncio.to_thread(_read_dist_files, dist_dir)
-    url = await _deploy_vercel(files, widget_id)
-    return DeploymentResult(url=url, widget_id=widget_id)
+    url, embed_url, deployment_id = await _deploy_vercel(files, widget_id)
+    return DeploymentResult(
+        url=url,
+        embed_url=embed_url,
+        widget_id=widget_id,
+        provider_deployment_id=deployment_id,
+    )
 
 
 def _project_name(widget_id: str) -> str:
-    return f"magai-widget-{widget_id[:8]}"
+    """The tool's own Vercel project — one project per tool, for its whole life.
+
+    The full id, not a prefix. A truncated id shares a project between any two
+    tools whose ids collide in those characters, which would mean one customer's
+    deploy silently replacing another's on the hostname their website embeds.
+    """
+    return f"magai-widget-{widget_id.lower()}"
 
 
 async def add_project_domain(widget_id: str, hostname: str) -> dict:

@@ -16,11 +16,11 @@ from app.features.integrations.providers import (
     get_provider,
 )
 from app.features.integrations.service import (
-    fan_out_lead,
     integration_covers,
     upsert_integration,
 )
-from app.features.leads.models import Lead
+from app.features.leads.delivery import enqueue_lead_deliveries, run_deliveries
+from app.features.leads.models import Lead, LeadDelivery
 from app.features.widgets.models import Widget
 from app.platform.security.secrets import (
     SecretDecryptionError,
@@ -398,8 +398,17 @@ class TestRoutes:
         assert listed["status"] == "error"
 
 
-class TestFanOut:
-    async def _lead(self, db, user, session_factory):
+class TestLeadFanOut:
+    """Getting a captured lead to every connected system, and keeping trying.
+
+    Delivery used to be one best-effort pass: a connection that failed was
+    marked broken and then excluded from the query for every subsequent lead, so
+    one bad afternoon at a CRM quietly stopped a business receiving leads there
+    until somebody happened to look. These go through the outbox, which is what
+    makes a failure a retry rather than a loss.
+    """
+
+    async def _lead(self, db, user):
         widget = Widget(
             user_id=user.id,
             target_url="https://example.com",
@@ -415,6 +424,13 @@ class TestFanOut:
         await db.refresh(lead)
         return widget, lead
 
+    async def _deliver(self, db, session_factory, lead, widget):
+        """Enqueue and attempt, exactly as the submit endpoint does."""
+        rows = await enqueue_lead_deliveries(db, lead, widget)
+        await db.commit()
+        integration_ids = [row.id for row in rows if row.channel == "integration"]
+        return await run_deliveries(integration_ids, session_factory=session_factory)
+
     async def test_delivers_to_every_covering_connection(
         self, db, user, session_factory, monkeypatch
     ):
@@ -425,7 +441,7 @@ class TestFanOut:
             return httpx.Response(200, request=httpx.Request("POST", url))
 
         monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-        _, lead = await self._lead(db, user, session_factory)
+        widget, lead = await self._lead(db, user)
         await upsert_integration(
             db, user.id, "slack", {"endpoint_url": "https://hooks.slack.com/a/b"}, None
         )
@@ -434,8 +450,7 @@ class TestFanOut:
         )
         await db.commit()
 
-        delivered = await fan_out_lead(lead.id, session_factory)
-        assert delivered == 2
+        assert await self._deliver(db, session_factory, lead, widget) == 2
         await db.refresh(lead)
         assert lead.forwarded is True
 
@@ -448,7 +463,7 @@ class TestFanOut:
             raise AssertionError("should not have delivered")
 
         monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-        _, lead = await self._lead(db, user, session_factory)
+        widget, lead = await self._lead(db, user)
         await upsert_integration(
             db,
             user.id,
@@ -458,23 +473,24 @@ class TestFanOut:
         )
         await db.commit()
 
-        assert await fan_out_lead(lead.id, session_factory) == 0
+        assert await self._deliver(db, session_factory, lead, widget) == 0
 
-    async def test_a_failing_provider_is_recorded_not_raised(
+    async def test_a_failing_provider_is_recorded_and_retried_later(
         self, db, user, session_factory, monkeypatch
     ):
-        # A visitor on a customer's website must never see a CRM outage.
+        # A visitor on a customer's website must never see a CRM outage — and
+        # the lead must not be quietly abandoned because of one either.
         async def fake_post(self, url, **kwargs):
             return httpx.Response(500, text="upstream boom", request=httpx.Request("POST", url))
 
         monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-        _, lead = await self._lead(db, user, session_factory)
+        widget, lead = await self._lead(db, user)
         integration = await upsert_integration(
             db, user.id, "slack", {"endpoint_url": "https://hooks.slack.com/a/b"}, None
         )
         await db.commit()
 
-        assert await fan_out_lead(lead.id, session_factory) == 0
+        assert await self._deliver(db, session_factory, lead, widget) == 0
 
         async with session_factory() as check:
             from sqlalchemy import select
@@ -482,7 +498,8 @@ class TestFanOut:
             refreshed = await check.get(Integration, integration.id)
             assert refreshed.status == "error"
             assert refreshed.failed_count == 1
-            deliveries = (
+
+            attempts = (
                 (
                     await check.execute(
                         select(IntegrationDelivery).where(
@@ -493,7 +510,53 @@ class TestFanOut:
                 .scalars()
                 .all()
             )
-            assert [d.status for d in deliveries] == ["failed"]
+            assert [a.status for a in attempts] == ["failed"]
+
+            # The lead is still owed to this connection, with a time to try again.
+            owed = (
+                (
+                    await check.execute(
+                        select(LeadDelivery).where(LeadDelivery.channel == "integration")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert [row.status for row in owed] == ["pending"]
+            assert owed[0].attempts == 1
+            assert owed[0].next_attempt_at is not None
+
+    async def test_a_connection_that_failed_before_still_gets_the_next_lead(
+        self, db, user, session_factory, monkeypatch
+    ):
+        """The bug this rewrite exists to kill.
+
+        One failure used to set the connection to `error`, and the fan-out only
+        ever queried connections in `connected`. Every lead after that skipped
+        it — no attempt, no record, no warning — so a business could lose weeks
+        of leads to a token that expired one Tuesday.
+        """
+
+        async def fake_post(self, url, **kwargs):
+            return httpx.Response(200, request=httpx.Request("POST", url))
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+        widget, lead = await self._lead(db, user)
+        integration = await upsert_integration(
+            db, user.id, "slack", {"endpoint_url": "https://hooks.slack.com/a/b"}, None
+        )
+        integration.status = "error"
+        integration.last_error = "yesterday's outage"
+        await db.commit()
+
+        assert await self._deliver(db, session_factory, lead, widget) == 1
+
+        async with session_factory() as check:
+            refreshed = await check.get(Integration, integration.id)
+            # Recovered, not just delivered: a connection that works again must
+            # stop being reported as broken.
+            assert refreshed.status == "connected"
+            assert refreshed.last_error is None
 
     async def test_a_disabled_connection_receives_nothing(
         self, db, user, session_factory, monkeypatch
@@ -502,11 +565,11 @@ class TestFanOut:
             raise AssertionError("should not have delivered")
 
         monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-        _, lead = await self._lead(db, user, session_factory)
+        widget, lead = await self._lead(db, user)
         integration = await upsert_integration(
             db, user.id, "slack", {"endpoint_url": "https://hooks.slack.com/a/b"}, None
         )
         integration.status = "disabled"
         await db.commit()
 
-        assert await fan_out_lead(lead.id, session_factory) == 0
+        assert await self._deliver(db, session_factory, lead, widget) == 0

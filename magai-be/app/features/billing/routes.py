@@ -74,6 +74,7 @@ async def get_plan_catalog() -> PlanCatalogResponse:
     return PlanCatalogResponse(
         plans=[plan_to_response(plan) for plan in all_plans()],
         currency=settings.widget_launch_currency,
+        single_tool_price=settings.widget_launch_price_cents,
     )
 
 

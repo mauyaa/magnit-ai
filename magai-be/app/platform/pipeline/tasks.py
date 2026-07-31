@@ -36,6 +36,7 @@ from app.platform.observability.metrics import (
     heal_sweep_widgets,
     pipeline_build_duration_seconds,
     pipeline_builds_total,
+    product_activation_events_total,
 )
 from app.platform.pipeline.engine import BuildResult, generate_and_deploy
 from app.platform.pipeline.engine import build as pipeline_build
@@ -49,7 +50,7 @@ from app.platform.pipeline.schemas import (
     SiteEvidence,
     WidgetType,
 )
-from app.platform.security.locks import LockNotAcquired, distributed_lock
+from app.platform.security.locks import LockNotAcquired, distributed_lock, process_lock
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ def widget_lock_key(widget_id: str) -> str:
 
 
 _loop: asyncio.AbstractEventLoop | None = None
+_local_build_tasks: set[asyncio.Task[None]] = set()
 
 
 def _get_loop() -> asyncio.AbstractEventLoop:
@@ -146,7 +148,12 @@ async def _update_build_progress(widget_id: str, **kwargs: Any) -> None:
         logger.warning("Could not persist build progress for %s", widget_id, exc_info=True)
 
 
-async def _update_widget_after_build(widget_id: str, build_result: BuildResult) -> None:
+async def _update_widget_after_build(
+    widget_id: str,
+    build_result: BuildResult,
+    *,
+    local_publish: bool = False,
+) -> None:
     async with async_session_factory() as session:
         result = await session.execute(select(Widget).where(Widget.id == widget_id))
         widget = result.scalar_one_or_none()
@@ -166,14 +173,40 @@ async def _update_widget_after_build(widget_id: str, build_result: BuildResult) 
         widget.build_progress = None
         widget.heal_failure_count = 0
 
-        if build_result.deployment.url:
-            await record_deployment(session, widget, build_result.deployment.url, trigger="build")
+        # Artifacts must exist before database state tells a browser that the
+        # tool is live. This ordering matters for local publishing, where the
+        # first iframe request can arrive immediately after the status poll.
+        _save_to_workspace(widget_id, widget, build_result)
+
+        deployment_url = build_result.deployment.url
+        embed_url = build_result.deployment.embed_url
+        provider_deployment_id = build_result.deployment.provider_deployment_id
+        trigger = "build"
+        if local_publish:
+            # One address per tool that serves whatever is currently on disk —
+            # the same guarantee the production alias gives, locally.
+            deployment_url = f"{settings.site_url.rstrip('/')}/local-widgets/{widget_id}/"
+            embed_url = deployment_url
+            provider_deployment_id = None
+            trigger = "local_build"
+
+        if deployment_url:
+            await record_deployment(
+                session,
+                widget,
+                deployment_url,
+                trigger=trigger,
+                embed_url=embed_url,
+                provider_deployment_id=provider_deployment_id,
+            )
+            product_activation_events_total.labels("publish", "succeeded").inc()
         else:
-            # skip_deploy build: artifacts exist but nothing is published yet.
-            widget.status = "active"
+            # A build with publishing explicitly skipped is not live. Keep it
+            # retryable and never show an "active" badge without a working URL.
+            widget.status = "analyzed"
+            widget.deployment_url = None
             widget.embed_code = None
 
-        _save_to_workspace(widget_id, widget, build_result)
         await session.commit()
         logger.info("Widget %s build complete", widget_id)
 
@@ -186,6 +219,9 @@ async def _run_build_pipeline(
     architect_override_dict: dict | None = None,
     source_evidence_dict: dict | None = None,
     creation_brief_dict: dict | None = None,
+    *,
+    local_publish: bool = False,
+    use_process_lock: bool = False,
 ) -> None:
     blueprint = Blueprint(**blueprint_dict)
     architect_override = (
@@ -202,7 +238,12 @@ async def _run_build_pipeline(
 
     # One build per widget at a time: concurrent builds share a project directory.
     # The same key the heal sweep takes, so the two cannot overlap either.
-    async with distributed_lock(widget_lock_key(widget_id)):
+    build_lock = (
+        process_lock(widget_lock_key(widget_id))
+        if use_process_lock
+        else distributed_lock(widget_lock_key(widget_id))
+    )
+    async with build_lock:
         build_result = await pipeline_build(
             blueprint,
             url,
@@ -214,7 +255,11 @@ async def _run_build_pipeline(
             brand_overrides=brand_overrides,
             token_overrides=token_overrides,
         )
-        await _update_widget_after_build(widget_id, build_result)
+        await _update_widget_after_build(
+            widget_id,
+            build_result,
+            local_publish=local_publish,
+        )
 
 
 async def _workspace_brand_overrides(
@@ -338,6 +383,95 @@ def build_widget_task(
         raise self.retry(exc=exc) from exc
 
 
+async def run_local_widget_build(
+    widget_id: str,
+    blueprint_dict: dict,
+    url: str,
+    *,
+    publish: bool,
+    architect_override_dict: dict | None = None,
+    source_evidence_dict: dict | None = None,
+    creation_brief_dict: dict | None = None,
+) -> None:
+    """Run one complete build inside the development API process.
+
+    This is the explicit local counterpart to the Celery entry point, not a
+    production fail-open. It uses the same pipeline, durable progress fields,
+    artifact store, and error state as the worker path.
+    """
+    started = time.perf_counter()
+    pipeline_builds_total.labels("started").inc()
+
+    try:
+        await _run_build_pipeline(
+            widget_id,
+            blueprint_dict,
+            url,
+            True,
+            architect_override_dict,
+            source_evidence_dict,
+            creation_brief_dict,
+            local_publish=publish,
+            use_process_lock=True,
+        )
+        pipeline_builds_total.labels("succeeded").inc()
+        pipeline_build_duration_seconds.observe(time.perf_counter() - started)
+    except LockNotAcquired:
+        logger.warning("Local build for widget %s skipped — already in progress", widget_id)
+    except Exception as exc:
+        pipeline_builds_total.labels("failed").inc()
+        logger.exception("Local build failed for widget %s", widget_id)
+        try:
+            await event_manager.publish_stage(
+                widget_id, "pipeline", "failed", "Build failed", progress=0.0
+            )
+        except Exception:
+            logger.warning("Could not publish failure event for %s", widget_id)
+        await _update_build_progress(
+            widget_id,
+            status="failed",
+            build_error=str(exc)[:2000],
+            build_stage=None,
+            build_progress=None,
+        )
+
+
+def schedule_local_widget_build(
+    widget_id: str,
+    blueprint_dict: dict,
+    url: str,
+    *,
+    publish: bool,
+    architect_override_dict: dict | None = None,
+    source_evidence_dict: dict | None = None,
+    creation_brief_dict: dict | None = None,
+) -> None:
+    """Schedule a dev build and retain it until completion."""
+    task = asyncio.create_task(
+        run_local_widget_build(
+            widget_id,
+            blueprint_dict,
+            url,
+            publish=publish,
+            architect_override_dict=architect_override_dict,
+            source_evidence_dict=source_evidence_dict,
+            creation_brief_dict=creation_brief_dict,
+        ),
+        name=f"local-widget-build:{widget_id}",
+    )
+    _local_build_tasks.add(task)
+    task.add_done_callback(_local_build_tasks.discard)
+
+
+async def cancel_local_widget_builds() -> None:
+    """Cancel in-process builds during API shutdown."""
+    tasks = tuple(_local_build_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 # --------------------------------------------------------------------------- #
 # Self-heal sweep
 # --------------------------------------------------------------------------- #
@@ -401,7 +535,12 @@ async def _heal_brand_drift(session: AsyncSession, widget: Widget) -> None:
         )
         widget.design_tokens = build_result.design_tokens.model_dump(mode="json")
         await record_deployment(
-            session, widget, build_result.deployment.url, trigger="heal_brand_drift"
+            session,
+            widget,
+            build_result.deployment.url,
+            trigger="heal_brand_drift",
+            embed_url=build_result.deployment.embed_url,
+            provider_deployment_id=build_result.deployment.provider_deployment_id,
         )
         _save_to_workspace(str(widget.id), widget, build_result)
 
@@ -455,7 +594,14 @@ async def _heal_deploy_health(session: AsyncSession, widget: Widget) -> None:
             raise RuntimeError("no saved build artifacts to redeploy")
 
         deployment = await deploy_directory(str(dist_dir), str(widget.id))
-        await record_deployment(session, widget, deployment.url, trigger="heal_deploy_health")
+        await record_deployment(
+            session,
+            widget,
+            deployment.url,
+            trigger="heal_deploy_health",
+            embed_url=deployment.embed_url,
+            provider_deployment_id=deployment.provider_deployment_id,
+        )
 
         event.status = "healed"
         event.healed_at = datetime.now(UTC)
@@ -554,3 +700,28 @@ def run_self_heal_sweep(self: Task) -> dict[str, Any]:
 async def _sweep_with_lock() -> dict:
     async with distributed_lock("self-heal-sweep", ttl_seconds=3600):
         return await _run_self_heal_sweep()
+
+
+@celery_app.task(bind=True, acks_late=True)
+def run_lead_delivery_sweep(self: Task) -> dict[str, Any]:
+    """Retry every lead delivery whose backoff has elapsed.
+
+    The immediate attempt after capture covers the common case. This covers the
+    one that actually loses a business its leads: the CRM that was down for ten
+    minutes, the worker that restarted mid-delivery, the endpoint that
+    rate-limited a burst. Without it the outbox would record failures nobody
+    ever acted on, which is a more honest version of the same problem.
+    """
+    from app.features.leads.delivery import sweep_due_deliveries
+
+    loop = _get_loop()
+    try:
+
+        async def _locked() -> int:
+            async with distributed_lock("lead-delivery-sweep", ttl_seconds=600):
+                return await sweep_due_deliveries()
+
+        return {"delivered": loop.run_until_complete(_locked())}
+    except LockNotAcquired:
+        logger.info("Another lead delivery sweep is already running")
+        return {"skipped": True, "reason": "sweep_already_running"}

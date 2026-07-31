@@ -241,17 +241,36 @@ STITCHER_REPLY = {
     },
 }
 
-# Deliberately realistic: imports the injected SDK, calls submitLead and
-# calculateDecision, animates, and provides the reduced-motion escape. Anything
-# less is rejected by validation before the build is attempted.
+# Deliberately realistic: imports the injected SDK, renders its questions from
+# the live configuration, calls submitLead and calculateDecision, reports the
+# funnel, animates, and provides the reduced-motion escape. Anything less is
+# rejected by validation before the build is attempted.
 APP_JSX = """import React, { useState } from 'react';
-import { submitLead, calculateDecision, trackResult } from './lib/magnitai.js';
+import {
+  submitLead,
+  calculateDecision,
+  useLiveConfig,
+  trackStart,
+  trackComplete,
+  trackResult,
+} from './lib/magnitai.js';
 
 export default function App() {
-  const [answers, setAnswers] = useState({ monthly_patients: 25, tracks_online: false });
+  const { decisionSpec } = useLiveConfig();
+  const questions = decisionSpec?.questions ?? [];
+  const [answers, setAnswers] = useState({});
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState('idle');
   const outcome = calculateDecision(answers);
+
+  function answer(id, value) {
+    if (Object.keys(answers).length === 0) trackStart();
+    setAnswers((current) => ({ ...current, [id]: value }));
+    if (Object.keys(answers).length + 1 === questions.length) {
+      trackComplete(outcome.result?.key);
+      trackResult(outcome.result?.key);
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -263,7 +282,13 @@ export default function App() {
   return (
     <main className="min-h-screen p-8 transition-colors motion-reduce:transition-none">
       <h1 className="text-4xl font-bold">What is a clearer booking path worth?</h1>
-      <div aria-live="polite" onLoad={() => trackResult(outcome.result)}>{outcome.value}</div>
+      {questions.map((question) => (
+        <label key={question.id} htmlFor={question.id}>
+          {question.label}
+          <input id={question.id} onChange={(e) => answer(question.id, e.target.value)} />
+        </label>
+      ))}
+      <div aria-live="polite">{outcome.value}</div>
       <form onSubmit={handleSubmit}>
         <label htmlFor="email">Work email</label>
         <input id="email" type="email" value={email}
@@ -512,7 +537,7 @@ async def test_the_built_artifact_is_what_gets_uploaded(pipeline):
     uploaded = {entry["file"] for entry in pipeline["deploys"][0]["files"]}
 
     assert uploaded == {"index.html", "assets/app.js"}
-    assert pipeline["deploys"][0]["name"] == f"magai-widget-{WIDGET_ID[:8]}"
+    assert pipeline["deploys"][0]["name"] == f"magai-widget-{WIDGET_ID}"
     assert pipeline["deploys"][0]["target"] == "production"
 
 

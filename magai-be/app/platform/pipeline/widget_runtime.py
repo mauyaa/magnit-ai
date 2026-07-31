@@ -184,10 +184,11 @@ def render_runtime_config(
 
 # The runtime SDK. Hand-written so lead capture is never a function of prompt
 # adherence — the model only decides when to call it and what the form looks like.
-RUNTIME_SDK_JS = """// MagnetAI widget runtime. Hand-written and injected at build time.
+RUNTIME_SDK_JS = """// Magnitai widget runtime. Hand-written and injected at build time.
 // The generated UI must call submitLead() to capture a lead; do not re-implement
 // the network call in generated code.
-import { MAGNITAI_CONFIG } from './config.js';
+import { useSyncExternalStore } from 'react';
+import { MAGNITAI_CONFIG } from '../config.js';
 
 const { widgetId, apiBaseUrl } = MAGNITAI_CONFIG;
 const sessionKey = `magnit:${widgetId}:session`;
@@ -225,6 +226,25 @@ export function onConfigChange(listener) {
 export const getDecisionSpec = () => live.decisionSpec;
 export const getOutcomes = () => live.outcomes;
 export const isAcceptingLeads = () => live.acceptingLeads !== false;
+export const getLiveConfig = () => live;
+
+/**
+ * The configuration, as a React value that updates itself.
+ *
+ * This is the hook every generated app must render from, and it is the entire
+ * reason the product can promise that editing a question is live. `live` is
+ * replaced once the overlay resolves; a component that read it during its first
+ * render and kept the value would show the questions as they were when the tool
+ * was last built, while calculateDecision() scored the visitor against the
+ * owner's current ones — the two silently disagreeing is worse than either.
+ *
+ * useSyncExternalStore rather than useState + useEffect: the store is module
+ * state that can change before a component mounts, and this is the one hook
+ * that reads it without tearing.
+ */
+export function useLiveConfig() {
+  return useSyncExternalStore(onConfigChange, getLiveConfig, getLiveConfig);
+}
 
 async function loadRuntimeConfig() {
   try {
@@ -233,6 +253,8 @@ async function loadRuntimeConfig() {
     });
     if (!response.ok) return;
     const payload = await response.json();
+    // A new object every time: useSyncExternalStore compares by identity, so
+    // mutating the existing one would leave every subscriber on stale copy.
     live = {
       decisionSpec: payload.decision || live.decisionSpec,
       outcomes: payload.outcomes || live.outcomes,
@@ -476,8 +498,19 @@ export function trackImpression() {
 
   const url = `${apiBaseUrl}/api/widgets/${widgetId}/impression`;
   try {
-    // keepalive so the request survives the page being closed immediately.
-    fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
+    // The host page's address travels with the view. It is what proves the
+    // snippet is actually on a customer's site — a visitor who scrolls past
+    // without touching anything still counts as installed — and it is what
+    // keeps the owner's own preview screens out of their numbers.
+    fetch(url, {
+      method: 'POST',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_url:
+          typeof document !== 'undefined' ? document.referrer || null : null,
+      }),
+    }).catch(() => {});
   } catch {
     // Never surface telemetry failures to a visitor.
   }

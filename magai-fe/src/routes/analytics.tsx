@@ -83,7 +83,7 @@ function Funnel({ data }: { data: PortfolioAnalytics }) {
     <article className="surface flex flex-col p-5">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-base font-medium text-foreground">Visitor journey</h2>
-        <span className="text-[11px] text-muted-foreground">All time</span>
+        <span className="text-xs text-muted-foreground">All time</span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">Where interest becomes intent</p>
 
@@ -117,7 +117,7 @@ function Funnel({ data }: { data: PortfolioAnalytics }) {
                * "120% of the step before" reads as a bug rather than as that.
                */}
               {kept !== null && kept <= 100 && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {kept.toFixed(0)}% of the step before
                 </p>
               )}
@@ -215,7 +215,10 @@ function AnalyticsPage() {
           delta={
             comparable && conversion !== null && priorConversion !== null
               ? { percent: percentChange(conversion, priorConversion) }
-              : undefined
+              : // The absence of a comparison is itself worth stating, and it
+                // is what the three cards beside this one say. Undefined left
+                // this card alone with an empty line under its number.
+                { percent: null }
           }
         />
       </StatRow>
@@ -288,7 +291,7 @@ function AnalyticsPage() {
                         >
                           {experience.title}
                         </Link>
-                        <span className="mt-0.5 block text-[11px] capitalize text-muted-foreground">
+                        <span className="mt-0.5 block text-xs capitalize text-muted-foreground">
                           {experience.status}
                         </span>
                       </td>

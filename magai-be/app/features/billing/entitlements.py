@@ -181,6 +181,33 @@ class Entitlements:
             )
 
 
+async def plan_lead_limit(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """How many leads per tool this workspace's plan allows. Zero without one.
+
+    Deliberately one query rather than a full ``resolve_entitlements``: this is
+    read on the public lead-submission path, which runs on a visitor's request on
+    someone else's website, and four queries there would be four queries per lead.
+    """
+    subscription = await db.scalar(select(Subscription).where(Subscription.user_id == user_id))
+    if subscription is None or subscription.status not in ENTITLING_STATUSES:
+        return 0
+    return get_plan(subscription.plan).lead_limit_per_tool
+
+
+def effective_lead_cap(widget_cap: int, plan_limit: int) -> int:
+    """The number of leads a tool may actually capture.
+
+    Two allowances, and a tool gets the better of them. ``widget_cap`` is what a
+    one-off launch bought outright and keeps forever; ``plan_limit`` is what the
+    subscription currently grants. Storing only the first is why Studio promised
+    2,000 leads a tool and delivered 500 — the column was written once at
+    creation and never revisited when the customer subscribed. Taking the maximum
+    also means a lapsed subscription cannot retroactively take away leads
+    somebody already paid outright for.
+    """
+    return max(int(widget_cap or 0), int(plan_limit or 0))
+
+
 async def _granted_widget_ids(db: AsyncSession, user_id: uuid.UUID) -> frozenset[uuid.UUID]:
     rows = await db.execute(
         select(Widget.id).where(

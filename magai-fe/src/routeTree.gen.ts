@@ -14,11 +14,14 @@ import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as BuildRouteImport } from './routes/build'
 import { Route as DesignSystemRouteImport } from './routes/design-system'
 import { Route as ExamplesRouteImport } from './routes/examples'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as HowItWorksRouteImport } from './routes/how-it-works'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as BuildStoryWidgetIdRouteImport } from './routes/build-story.$widgetId'
 import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as DashboardBrandRouteImport } from './routes/dashboard/brand'
@@ -54,6 +57,11 @@ const ExamplesRoute = ExamplesRouteImport.update({
   path: '/examples',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HowItWorksRoute = HowItWorksRouteImport.update({
   id: '/how-it-works',
   path: '/how-it-works',
@@ -74,9 +82,19 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TermsRoute = TermsRouteImport.update({
   id: '/terms',
   path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BuildStoryWidgetIdRoute = BuildStoryWidgetIdRouteImport.update({
@@ -132,11 +150,14 @@ export interface FileRoutesByFullPath {
   '/build': typeof BuildRoute
   '/design-system': typeof DesignSystemRoute
   '/examples': typeof ExamplesRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/how-it-works': typeof HowItWorksRoute
   '/login': typeof LoginRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/build-story/$widgetId': typeof BuildStoryWidgetIdRoute
   '/dashboard/brand': typeof DashboardBrandRoute
   '/dashboard/help': typeof DashboardHelpRoute
@@ -153,11 +174,14 @@ export interface FileRoutesByTo {
   '/build': typeof BuildRoute
   '/design-system': typeof DesignSystemRoute
   '/examples': typeof ExamplesRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/how-it-works': typeof HowItWorksRoute
   '/login': typeof LoginRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/build-story/$widgetId': typeof BuildStoryWidgetIdRoute
   '/dashboard/brand': typeof DashboardBrandRoute
   '/dashboard/help': typeof DashboardHelpRoute
@@ -175,11 +199,14 @@ export interface FileRoutesById {
   '/build': typeof BuildRoute
   '/design-system': typeof DesignSystemRoute
   '/examples': typeof ExamplesRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/how-it-works': typeof HowItWorksRoute
   '/login': typeof LoginRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/build-story/$widgetId': typeof BuildStoryWidgetIdRoute
   '/dashboard/brand': typeof DashboardBrandRoute
   '/dashboard/help': typeof DashboardHelpRoute
@@ -198,11 +225,14 @@ export interface FileRouteTypes {
     | '/build'
     | '/design-system'
     | '/examples'
+    | '/forgot-password'
     | '/how-it-works'
     | '/login'
     | '/pricing'
     | '/privacy'
+    | '/reset-password'
     | '/terms'
+    | '/verify-email'
     | '/build-story/$widgetId'
     | '/dashboard/brand'
     | '/dashboard/help'
@@ -219,11 +249,14 @@ export interface FileRouteTypes {
     | '/build'
     | '/design-system'
     | '/examples'
+    | '/forgot-password'
     | '/how-it-works'
     | '/login'
     | '/pricing'
     | '/privacy'
+    | '/reset-password'
     | '/terms'
+    | '/verify-email'
     | '/build-story/$widgetId'
     | '/dashboard/brand'
     | '/dashboard/help'
@@ -240,11 +273,14 @@ export interface FileRouteTypes {
     | '/build'
     | '/design-system'
     | '/examples'
+    | '/forgot-password'
     | '/how-it-works'
     | '/login'
     | '/pricing'
     | '/privacy'
+    | '/reset-password'
     | '/terms'
+    | '/verify-email'
     | '/build-story/$widgetId'
     | '/dashboard/brand'
     | '/dashboard/help'
@@ -262,11 +298,14 @@ export interface RootRouteChildren {
   BuildRoute: typeof BuildRoute
   DesignSystemRoute: typeof DesignSystemRoute
   ExamplesRoute: typeof ExamplesRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   HowItWorksRoute: typeof HowItWorksRoute
   LoginRoute: typeof LoginRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   TermsRoute: typeof TermsRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
   BuildStoryWidgetIdRoute: typeof BuildStoryWidgetIdRoute
   DashboardBrandRoute: typeof DashboardBrandRoute
   DashboardHelpRoute: typeof DashboardHelpRoute
@@ -315,6 +354,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExamplesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/how-it-works': {
       id: '/how-it-works'
       path: '/how-it-works'
@@ -343,11 +389,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/terms': {
       id: '/terms'
       path: '/terms'
       fullPath: '/terms'
       preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/build-story/$widgetId': {
@@ -422,11 +482,14 @@ const rootRouteChildren: RootRouteChildren = {
   BuildRoute: BuildRoute,
   DesignSystemRoute: DesignSystemRoute,
   ExamplesRoute: ExamplesRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   HowItWorksRoute: HowItWorksRoute,
   LoginRoute: LoginRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   TermsRoute: TermsRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
   BuildStoryWidgetIdRoute: BuildStoryWidgetIdRoute,
   DashboardBrandRoute: DashboardBrandRoute,
   DashboardHelpRoute: DashboardHelpRoute,

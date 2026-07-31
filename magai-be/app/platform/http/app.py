@@ -19,6 +19,7 @@ from app.features.leads.routes import router as leads_router
 from app.features.payments.routes import router as payments_router
 from app.features.users.api_access import router as api_access_router
 from app.features.users.routes import router as users_router
+from app.features.widgets.local_hosting import router as local_widget_router
 from app.features.widgets.routes import router as widgets_router
 from app.platform.config.settings import settings
 from app.platform.db.session import async_session_factory, engine, rows_affected
@@ -43,7 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # here. `import app.platform.db.models` inside this function would bind the
     # local name `app` to the module and shadow the FastAPI parameter.
     logger.info(
-        "Starting MagnetAI API",
+        "Starting Magnitai API",
         extra={"environment": settings.environment, "sentry": bool(settings.sentry_dsn)},
     )
 
@@ -69,9 +70,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if settings.local_builds_enabled:
+            from app.platform.pipeline.tasks import cancel_local_widget_builds
+
+            await cancel_local_widget_builds()
         # Graceful shutdown: return pooled connections so in-flight queries finish
         # and Postgres does not accumulate abandoned sessions across restarts.
-        logger.info("Shutting down MagnetAI API")
+        logger.info("Shutting down Magnitai API")
         await engine.dispose()
 
 
@@ -80,7 +85,7 @@ def create_app() -> FastAPI:
     init_sentry()
 
     app = FastAPI(
-        title="MagnetAI",
+        title="Magnitai",
         version="1.0.0",
         lifespan=lifespan,
         # OpenAPI docs are useful internally but enumerate the whole attack
@@ -135,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(users_router)
     app.include_router(api_access_router)
     app.include_router(widgets_router)
+    app.include_router(local_widget_router)
     app.include_router(billing_router)
     app.include_router(payments_router)
     app.include_router(integrations_router)

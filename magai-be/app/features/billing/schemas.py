@@ -28,6 +28,7 @@ class PlanResponse(BaseModel):
 class PlanCatalogResponse(BaseModel):
     plans: list[PlanResponse]
     currency: str
+    single_tool_price: int
 
 
 class UsageResponse(BaseModel):

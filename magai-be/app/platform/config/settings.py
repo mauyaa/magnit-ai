@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     redis_timeout_seconds: float = 0.25
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    # A development checkout must be able to exercise the complete customer
+    # story without pretending that Redis and Vercel are present. In this mode
+    # builds run in the API process, progress events stay in memory, and the
+    # generated dist is served from ``site_url``. Production never takes this
+    # path, even if the flag is accidentally left enabled.
+    development_local_builds: bool = True
 
     # ---- Third-party -------------------------------------------------------
     gemini_api_key: str = ""
@@ -89,14 +95,14 @@ class Settings(BaseSettings):
     # "console" logs instead of sending — the default so development and CI never
     # need credentials and cannot accidentally mail real users.
     email_backend: str = "console"
-    email_from: str = "MagnetAI <no-reply@magnitai.local>"
+    email_from: str = "Magnitai <no-reply@magnitai.local>"
     smtp_host: str = "localhost"
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
 
     # ---- MFA ----------------------------------------------------------------
-    mfa_issuer: str = "MagnetAI"
+    mfa_issuer: str = "Magnitai"
     mfa_recovery_code_count: int = 8
 
     # ---- HTTP security -----------------------------------------------------
@@ -153,6 +159,12 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+
+    @property
+    def local_builds_enabled(self) -> bool:
+        return (
+            self.development_local_builds and not self.is_production and not self.vercel_api_token
+        )
 
     @property
     def enforce_plan_limits(self) -> bool:

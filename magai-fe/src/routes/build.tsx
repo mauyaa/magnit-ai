@@ -10,6 +10,22 @@ import { useAuth } from "@/lib/auth";
 
 const searchSchema = z.object({
   site: z.string().max(2048).optional().catch(undefined),
+  resume: z.string().uuid().optional().catch(undefined),
+  start: z
+    .union([z.literal(true), z.literal("true")])
+    .transform(() => true)
+    .optional()
+    .catch(undefined),
+  /**
+   * Where Stripe sent the customer back to — not whether they paid.
+   *
+   * This used to be absent from the schema, so the router dropped it and the
+   * flow had no idea a checkout had just ended. A customer who pressed "back"
+   * on the payment page landed on a tool that was still marked pending and
+   * could not be built until Stripe expired the session hours later. The value
+   * is a routing hint only: the outcome is read back from the API.
+   */
+  checkout: z.enum(["success", "cancelled"]).optional().catch(undefined),
 });
 
 export const Route = createFileRoute("/build")({
@@ -80,12 +96,15 @@ export function BuildShell({
 
 function Build() {
   const navigate = useNavigate();
-  const { site } = Route.useSearch();
+  const { site, start, resume, checkout } = Route.useSearch();
   const { isAuthenticated } = useAuth();
 
   const flow = (
     <CheckoutFlow
       initialSite={site}
+      resumeWidgetId={resume}
+      autoStart={start === true}
+      checkoutReturn={checkout}
       onBuildStart={(widgetId) =>
         navigate({ to: "/build-story/$widgetId", params: { widgetId }, replace: true })
       }

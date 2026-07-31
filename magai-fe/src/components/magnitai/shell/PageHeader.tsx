@@ -30,7 +30,23 @@ export function PageHeader({
   return (
     <header className="flex flex-col gap-4 pb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0">
-        <h1 className="truncate text-[1.75rem] font-medium leading-tight tracking-[-0.025em] text-foreground">
+        {/*
+         * A clear step above the largest number on the page — from `sm` up.
+         *
+         * At one size the page title was 28px while the KPI values beneath it
+         * were 30px, so the two competed and neither led; the screen read as
+         * busy without any one thing being wrong. A page title should be
+         * unmistakably the title, and the metrics are then free to be the
+         * loudest thing inside their own cards.
+         *
+         * On a phone it steps down and wraps rather than truncating. A tool
+         * called "Example Domain Needs Checklist" was ellipsised to
+         * "Example Domain Needs Chec…" at every heading size that fits the
+         * hierarchy — and this line is the one thing on the screen telling you
+         * which tool you are looking at. Two lines is a smaller cost than not
+         * being able to read the name; the clamp still protects the layout.
+         */}
+        <h1 className="line-clamp-2 text-2xl font-medium leading-tight tracking-[-0.03em] text-foreground sm:truncate sm:text-4xl">
           {title}
         </h1>
         {description && (

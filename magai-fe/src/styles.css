@@ -1267,6 +1267,18 @@
      `.btn` declaration and should win. */
   :where(.btn) {
     display: inline-flex;
+    /*
+     * The default size, stated with zero specificity so a utility beside it
+     * wins — the same fix this block already applies to `display`, for the
+     * same reason and one property later.
+     *
+     * Declared normally, `.btn` beat Tailwind's own type scale, so all 79
+     * places that wrote `btn ... text-sm` or `btn ... text-xs` rendered at
+     * 15px regardless. Every quiet secondary action in the workspace was
+     * shouting at exactly the volume of the primary one, and no amount of
+     * reading the markup would show it: the class was right there.
+     */
+    font-size: 0.9375rem;
   }
   .btn {
     align-items: center;
@@ -1275,7 +1287,6 @@
     height: 2.75rem;
     padding-inline: 1.25rem;
     border-radius: var(--radius);
-    font-size: 0.9375rem;
     font-weight: 550;
     letter-spacing: -0.006em;
     white-space: nowrap;
@@ -1402,6 +1413,34 @@
     letter-spacing: 0;
     text-transform: none;
     color: color-mix(in oklch, white 70%, transparent);
+  }
+
+  /*
+   * The small structural label: sidebar group headings, the scope line above a
+   * dense stat block, the language tag on a code panel.
+   *
+   * A different job from `.eyebrow` above, and that is why this exists. An
+   * eyebrow introduces a heading and should stay quiet underneath it; this one
+   * divides a list or names a region that has no heading of its own, so it
+   * needs to read as structure rather than as prose.
+   *
+   * The reason it is a class: the workspace had seven versions of it — 9, 10
+   * and 11px crossed with five letter-spacings, three weights and both
+   * families — because each screen re-derived it from scratch. Nobody chose
+   * those differences; they accumulated, and the result is a workspace that
+   * feels approximate without any single screen being wrong.
+   *
+   * Colour is deliberately not set here. This label appears on paper, on ink
+   * panels and on a customer's own brand colour, and the right value differs
+   * on each; the caller states it with a token. Everything typographic — the
+   * part that was actually drifting — is decided once, here.
+   */
+  .group-label {
+    font-size: 0.625rem;
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
 
   /* Numbers that sit in columns or update live must not jitter. */

@@ -43,6 +43,11 @@ class Widget(Base, TimestampMixin):
             name="ck_widgets_entitlement_status",
         ),
         Index("ix_widgets_user_created", "user_id", "created_at"),
+        # One claim per guest session per workspace. The claim request is sent
+        # from a browser that may retry it — a refresh, a double click, a
+        # network timeout the client could not tell from a failure — and without
+        # this each retry created another tool the customer never asked for.
+        UniqueConstraint("user_id", "claim_key", name="uq_widgets_user_claim_key"),
         # Partial index matching the heal-sweep predicate exactly: the sweep only
         # ever scans active widgets under the failure threshold, so indexing the
         # rest is dead weight on every write.
@@ -67,13 +72,23 @@ class Widget(Base, TimestampMixin):
     # The model is only allowed to reason over this crawler-produced source map.
     source_evidence: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     source_content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Fingerprint of the guest session this tool was claimed from. Null for
+    # anything created another way.
+    claim_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_brand_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     brand_tokens: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     visual_language: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     widget_logic: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     copywriting: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     design_tokens: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    # Where this exact build lives. Unique per deploy: a history handle, not an
+    # address to give anyone.
     deployment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The address inside the snippet on the customer's website. Written once, on
+    # first publish, and never changed again — rebuild, repair and rollback all
+    # move what it serves rather than where it points. Anything else silently
+    # breaks a page we do not control and cannot re-edit.
+    embed_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     embed_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     leads_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Views recorded by the deployed widget. The denominator for conversion rate —
@@ -108,6 +123,17 @@ class Widget(Base, TimestampMixin):
     build_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
     build_progress: Mapped[float | None] = mapped_column(nullable=True)
     build_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The first time this tool was seen on a page that is not one of ours, and
+    # the host it was seen on. This is what "installed" means: a passive embed
+    # nobody has interacted with yet is still installed, and the owner opening
+    # the preview in their own dashboard is still not.
+    first_embedded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Host only, never the full URL: enough to tell the owner where it is live,
+    # without keeping a log of the pages their visitors came from.
+    embed_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -222,6 +248,10 @@ class WidgetDeployment(Base, TimestampMixin):
         UUIDType, ForeignKey("widgets.id", ondelete="CASCADE"), nullable=False, index=True
     )
     deployment_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # The hosting provider's id for this build. Rolling back means re-pointing
+    # the tool's permanent hostname at an older deployment, and this is the only
+    # handle the provider accepts for that.
+    provider_deployment_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # "build" | "redeploy" | "heal_brand_drift" | "heal_deploy_health" | "rollback"
     trigger: Mapped[str] = mapped_column(String(30), nullable=False)
     is_current: Mapped[bool] = mapped_column(nullable=False, default=True)

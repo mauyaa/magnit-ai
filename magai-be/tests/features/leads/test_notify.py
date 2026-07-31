@@ -38,6 +38,9 @@ async def _widget(db, owner) -> Widget:
     return widget
 
 
+LEAD_ID = "6d1f4b02-9c1e-4a1f-9f0b-2c0f5d7a1b34"
+
+
 class TestTemplate:
     def test_puts_the_lead_address_in_the_subject(self):
         # The owner should be able to triage from the notification list alone.
@@ -46,6 +49,7 @@ class TestTemplate:
             lead_name="Jo",
             widget_title="Savings calculator",
             widget_id=str(uuid.uuid4()),
+            lead_id=LEAD_ID,
             score=None,
         )
         assert "jo@buyer.com" in subject
@@ -58,6 +62,7 @@ class TestTemplate:
             lead_name=None,
             widget_title="Quiz",
             widget_id="w",
+            lead_id=LEAD_ID,
             score=72,
         )
         _, without, _ = new_lead_email(
@@ -65,6 +70,7 @@ class TestTemplate:
             lead_name=None,
             widget_title="Quiz",
             widget_id="w",
+            lead_id=LEAD_ID,
             score=None,
         )
         assert "scored 72" in with_score
@@ -77,6 +83,7 @@ class TestTemplate:
             lead_name="<script>alert(1)</script>",
             widget_title="Quiz",
             widget_id="w",
+            lead_id=LEAD_ID,
             score=None,
         )
         assert "<script>" not in body
@@ -140,7 +147,7 @@ class TestNotifier:
 class TestSubmitEndpointStaysUp:
     """The guarantee that matters: this endpoint runs on a customer's website.
 
-    The notifier's session factory is pointed at the test database so the
+    The outbox's session factory is pointed at the test database so the
     background task genuinely executes — otherwise these would pass simply
     because it looked in an empty database and found nothing to do.
     """
@@ -153,6 +160,7 @@ class TestSubmitEndpointStaysUp:
 
         with (
             patch("app.features.leads.notify.async_session_factory", session_factory),
+            patch("app.features.leads.delivery.async_session_factory", session_factory),
             patch(SEND, new_callable=AsyncMock, side_effect=EmailDeliveryError("smtp down")),
         ):
             response = await client.post(
@@ -169,6 +177,7 @@ class TestSubmitEndpointStaysUp:
 
         with (
             patch("app.features.leads.notify.async_session_factory", session_factory),
+            patch("app.features.leads.delivery.async_session_factory", session_factory),
             patch(SEND, new_callable=AsyncMock) as send,
         ):
             await client.post(f"/api/leads/{widget.id}", json={"email": "buyer@example.com"})
@@ -193,6 +202,7 @@ class TestSubmitEndpointStaysUp:
 
         with (
             patch("app.features.leads.notify.async_session_factory", session_factory),
+            patch("app.features.leads.delivery.async_session_factory", session_factory),
             patch(SEND, real_send),
         ):
             response = await client.post(

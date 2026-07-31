@@ -42,6 +42,7 @@ function plan(over: Record<string, unknown> = {}) {
 
 const CATALOGUE = {
   currency: "usd",
+  single_tool_price: 9900,
   plans: [
     plan({ id: "free", name: "Free", monthly_price: 0, purchasable: false, live_tool_limit: 0 }),
     plan(),
@@ -90,6 +91,7 @@ describe("pricing page", () => {
     expect(await screen.findByText("$49")).toBeInTheDocument();
     expect(screen.getByText("$199")).toBeInTheDocument();
     expect(screen.getByText("$0")).toBeInTheDocument();
+    expect(screen.getByText(/pay \$99 once/i)).toBeInTheDocument();
   });
 
   it("asks the public catalogue endpoint without credentials", async () => {
@@ -149,5 +151,20 @@ describe("pricing page", () => {
 
     await findUnavailable();
     await expectNoA11yViolations(container);
+  });
+});
+
+describe("what a one-off launch actually includes", () => {
+  it("does not claim lead capture requires a subscription", async () => {
+    /*
+     * A one-off launch captures leads up to the cap it comes with — the server
+     * enforces exactly that. The page used to say lead capture was a reason to
+     * choose Studio, which meant the first thing a customer learned after
+     * paying was that the pricing page had misdescribed what they bought.
+     */
+    renderWithRouter(PricingPage);
+
+    const offer = await screen.findByText(/one tool, built, published and capturing leads/i);
+    expect(offer).toBeInTheDocument();
   });
 });

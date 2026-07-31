@@ -1,5 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, ExternalLink, Loader2, RefreshCw, Undo2, Users } from "lucide-react";
+import {
+  ArrowRight,
+  ExternalLink,
+  Loader2,
+  MapPin,
+  RefreshCw,
+  Target,
+  Undo2,
+  Users,
+} from "lucide-react";
 
 import { EmbedCodePanel } from "@/components/magnitai/EmbedCodePanel";
 import { LaunchSettings } from "@/components/magnitai/LaunchSettings";
@@ -10,6 +19,7 @@ import { RequireAuth } from "@/components/magnitai/RequireAuth";
 import { PageHeader, StatusPill } from "@/components/magnitai/shell/PageHeader";
 import { WidgetTabs, type TabDefinition, type WidgetTabId } from "@/components/magnitai/shell/Tabs";
 import { WorkspaceShell } from "@/components/magnitai/shell/WorkspaceShell";
+import { liveAddress } from "@/lib/widget-url";
 import {
   useDeployments,
   useDeployWidget,
@@ -18,6 +28,7 @@ import {
   useRollbackWidget,
   useWidget,
   useWidgetFunnel,
+  type DecisionSpec,
   type HealEvent,
   type WidgetData,
 } from "@/lib/api";
@@ -63,6 +74,88 @@ function statusOf(widget: WidgetData) {
   if (widget.deployment_url && widget.status === "active")
     return { tone: "live" as const, label: "Live" };
   return { tone: "idle" as const, label: "Not published" };
+}
+
+function decisionOf(widget: WidgetData): DecisionSpec | null {
+  const value = widget.widget_logic?.decision;
+  if (!value || typeof value !== "object") return null;
+
+  const decision = value as Partial<DecisionSpec>;
+  if (
+    typeof decision.buyer_question !== "string" ||
+    typeof decision.value_before_gate !== "string" ||
+    typeof decision.qualification_goal !== "string" ||
+    typeof decision.recommended_placement !== "string"
+  ) {
+    return null;
+  }
+
+  return value as DecisionSpec;
+}
+
+function CommercialBrief({ widget }: { widget: WidgetData }) {
+  const decision = decisionOf(widget);
+  if (!decision) return null;
+
+  const facts = [
+    {
+      label: "Visitor decision",
+      value: decision.buyer_question,
+    },
+    {
+      label: "Value before contact details",
+      value: decision.value_before_gate,
+    },
+    {
+      label: "Best placement",
+      value: decision.recommended_placement,
+      icon: MapPin,
+    },
+    {
+      label: "Lead qualification",
+      value: decision.qualification_goal,
+    },
+  ];
+
+  return (
+    <section className="surface overflow-hidden" aria-labelledby="commercial-brief-title">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <Target className="size-4" aria-hidden="true" />
+            Commercial brief
+          </div>
+          <h2
+            id="commercial-brief-title"
+            className="mt-2 text-base font-medium tracking-[-0.02em] text-foreground"
+          >
+            The job this tool was built to do
+          </h2>
+        </div>
+        <Link
+          to="/dashboard/widgets/$widgetId"
+          params={{ widgetId: widget.id }}
+          search={{ tab: widget.deployment_url ? "embed" : "questions" }}
+          className="btn btn-secondary h-9 text-sm"
+        >
+          {widget.deployment_url ? "Place it on the page" : "Review the experience"}
+          <ArrowRight className="size-4" aria-hidden="true" />
+        </Link>
+      </div>
+
+      <dl className="grid gap-px bg-border sm:grid-cols-2">
+        {facts.map(({ label, value, icon: Icon }) => (
+          <div key={label} className="bg-card px-5 py-4">
+            <dt className="group-label flex items-center gap-1.5 text-muted-foreground">
+              {Icon ? <Icon className="size-3" aria-hidden="true" /> : null}
+              {label}
+            </dt>
+            <dd className="mt-1.5 text-sm leading-6 text-foreground">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
 }
 
 /**
@@ -145,15 +238,16 @@ function HealRow({ event }: { event: HealEvent }) {
 }
 
 function LivePreview({ widget }: { widget: WidgetData }) {
-  if (widget.deployment_url) {
+  const address = liveAddress(widget);
+  if (address) {
     return (
       <div className="surface overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <span className="truncate font-mono text-xs text-muted-foreground">
-            {widget.deployment_url.replace(/^https?:\/\//, "")}
+            {address.replace(/^https?:\/\//, "")}
           </span>
           <a
-            href={widget.deployment_url}
+            href={address}
             target="_blank"
             rel="noreferrer"
             className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
@@ -163,7 +257,7 @@ function LivePreview({ widget }: { widget: WidgetData }) {
           </a>
         </div>
         <iframe
-          src={widget.deployment_url}
+          src={address}
           title={`${widget.title} — live preview`}
           className="h-[30rem] w-full border-0 bg-white"
           sandbox="allow-scripts allow-same-origin allow-forms"
@@ -192,7 +286,11 @@ function LivePreview({ widget }: { widget: WidgetData }) {
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
             Finish this tool to publish it to its own address and get an embed snippet.
           </p>
-          <Link to="/build" className="btn btn-primary mt-5 h-9 text-sm">
+          <Link
+            to="/build"
+            search={{ resume: widget.id }}
+            className="btn btn-primary mt-5 h-9 text-sm"
+          >
             Continue building
             <ArrowRight className="size-4" aria-hidden="true" />
           </Link>
@@ -267,9 +365,9 @@ function WidgetDetail() {
           </div>
         }
         actions={
-          widget.deployment_url ? (
+          liveAddress(widget) ? (
             <a
-              href={widget.deployment_url}
+              href={liveAddress(widget) as string}
               target="_blank"
               rel="noreferrer"
               className="btn btn-secondary h-9 text-sm"
@@ -297,6 +395,8 @@ function WidgetDetail() {
             ) : (
               <PublishChecklist widget={widget} />
             )}
+
+            <CommercialBrief widget={widget} />
 
             {funnel && (
               <section className="grid grid-cols-2 gap-px overflow-hidden rounded-[--radius-surface] border border-border bg-border sm:grid-cols-5">
@@ -332,7 +432,13 @@ function WidgetDetail() {
         {tab === "outcomes" && <OutcomesEditor widget={widget} />}
 
         {tab === "embed" && (
-          <EmbedCodePanel embedCode={widget.embed_code} deploymentUrl={widget.deployment_url} />
+          <EmbedCodePanel
+            widgetId={widget.id}
+            embedCode={widget.embed_code}
+            embedUrl={widget.embed_url}
+            recommendedPlacement={decisionOf(widget)?.recommended_placement}
+            targetUrl={widget.target_url}
+          />
         )}
 
         {tab === "leads" && (
@@ -352,6 +458,15 @@ function WidgetDetail() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   A lead will appear here after a visitor completes the capture step.
                 </p>
+                <Link
+                  to="/dashboard/widgets/$widgetId"
+                  params={{ widgetId: widget.id }}
+                  search={{ tab: "embed" }}
+                  className="btn btn-secondary mt-5 h-9 text-sm"
+                >
+                  Put this tool in front of visitors
+                  <ArrowRight className="size-4" aria-hidden="true" />
+                </Link>
               </div>
             ) : (
               <ul className="divide-y divide-border">

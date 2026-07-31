@@ -84,7 +84,7 @@ class StageRecorder:
 def engine_harness(monkeypatch):
     """Stub every outbound call, and report what the engine asked for."""
     recorder = StageRecorder()
-    calls: dict = {"deployed": [], "codegen": [], "architect": []}
+    calls: dict = {"deployed": [], "codegen": [], "codegen_options": [], "architect": []}
 
     @asynccontextmanager
     async def fake_agent(*args, **kwargs):
@@ -95,6 +95,7 @@ def engine_harness(monkeypatch):
 
     async def fake_codegen(widget_id, output, tokens, widget_type, widget_title, **kwargs):
         calls["codegen"].append(tokens)
+        calls["codegen_options"].append(kwargs)
         return WIDGET_CODE, f"/builds/{widget_id}"
 
     async def fake_deploy(dist_dir, widget_id):
@@ -219,6 +220,25 @@ class TestGenerateAndDeploy:
         )
 
         assert engine_harness["codegen"][0].css_variables["--color-primary"] == "#ff6600"
+
+    async def test_stitcher_outage_skips_a_second_unavailable_provider_call(
+        self, engine_harness, monkeypatch
+    ):
+        async def unavailable_stitcher(*args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+        monkeypatch.setattr(engine, "run_stitcher", unavailable_stitcher)
+
+        result = await engine.generate_and_deploy(
+            "w1",
+            architect_output(primary_color="#334488"),
+            WidgetType.ROI_CALCULATOR,
+            "Calc",
+            skip_deploy=True,
+        )
+
+        assert engine_harness["codegen_options"] == [{"force_fallback": True}]
+        assert result.design_tokens.css_variables["--color-primary"] == "#334488"
 
     async def test_stage_progress_is_reported_in_order(self, engine_harness):
         await engine.generate_and_deploy(

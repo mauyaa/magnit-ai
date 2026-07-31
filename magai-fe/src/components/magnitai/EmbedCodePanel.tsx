@@ -1,5 +1,7 @@
-import { Check, Code2, Copy, ExternalLink } from "lucide-react";
+import { Check, Code2, Copy, ExternalLink, Loader2, MapPin, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
+import { useReadiness } from "@/lib/api";
 
 export type PlatformTab = "html" | "react" | "webflow" | "wordpress" | "shopify";
 
@@ -15,12 +17,133 @@ const PLATFORMS: Array<{ id: PlatformTab; label: string; instruction: string }> 
   { id: "shopify", label: "Shopify", instruction: "Paste into a Custom Liquid section." },
 ];
 
+function InstallationVerifier({ widgetId }: { widgetId: string }) {
+  const readiness = useReadiness(widgetId);
+  const [result, setResult] = useState<"installed" | "missing" | "error" | null>(null);
+
+  async function verifyInstallation() {
+    const response = await readiness.refetch();
+    if (response.error || !response.data) {
+      setResult("error");
+      return;
+    }
+
+    const embedded = response.data.checks.find((check) => check.id === "embedded");
+    setResult(embedded?.done ? "installed" : "missing");
+  }
+
+  const message =
+    result === "installed"
+      ? "Installation detected"
+      : result === "missing"
+        ? "Not detected yet"
+        : result === "error"
+          ? "Could not check"
+          : "";
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        onClick={() => void verifyInstallation()}
+        disabled={readiness.isFetching}
+        className="btn btn-secondary h-9 px-3 text-xs"
+      >
+        {readiness.isFetching ? (
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        ) : result === "installed" ? (
+          <Check className="size-3.5 text-success" aria-hidden="true" />
+        ) : (
+          <RefreshCw className="size-3.5" aria-hidden="true" />
+        )}
+        Verify installation
+      </button>
+      <span
+        role={message ? "status" : undefined}
+        className={`text-xs ${
+          result === "installed"
+            ? "text-success"
+            : result === "missing" || result === "error"
+              ? "text-muted-foreground"
+              : ""
+        }`}
+      >
+        {message}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The React component a developer drops into their app.
+ *
+ * The other four platforms take raw HTML, so they get the API's own snippet
+ * verbatim — one implementation, no chance of the height behaviour drifting
+ * between them. React cannot, so this is the one place the same contract is
+ * written twice, and it is written to match: same message type, same source
+ * check, same bounds.
+ */
+function reactSnippet(embedUrl: string): string {
+  const origin = new URL(embedUrl).origin;
+  return `import { useEffect, useRef, useState } from "react";
+
+const TOOL_URL = "${embedUrl}";
+const TOOL_ORIGIN = "${origin}";
+
+export function MagnitaiTool() {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(520);
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.source !== frame.current?.contentWindow) return;
+      if (event.origin !== TOOL_ORIGIN) return;
+      if (event.data?.type !== "magnit:resize") return;
+      const next = Number(event.data.height);
+      if (Number.isFinite(next) && next >= 240 && next <= 5000) {
+        setHeight(Math.ceil(next));
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  return (
+    <iframe
+      ref={frame}
+      src={TOOL_URL}
+      title="Interactive decision tool"
+      loading="lazy"
+      style={{ display: "block", width: "100%", height, border: 0 }}
+    />
+  );
+}`;
+}
+
+const PLATFORM_HEADER: Partial<Record<PlatformTab, string>> = {
+  webflow: "<!-- Paste into a Webflow Custom Embed element -->",
+  wordpress: "<!-- Paste into a WordPress Custom HTML block -->",
+  shopify: "{% comment %} Paste into a Shopify Custom Liquid section {% endcomment %}",
+};
+
 export function EmbedCodePanel({
+  widgetId,
   embedCode,
-  deploymentUrl,
+  embedUrl,
+  recommendedPlacement,
+  targetUrl,
 }: {
+  widgetId?: string;
   embedCode: string | null;
-  deploymentUrl: string | null;
+  /**
+   * The tool's permanent address — not the URL of one build.
+   *
+   * This is what the customer pastes into a page we cannot edit afterwards, so
+   * it has to keep resolving after every rebuild, repair and rollback.
+   */
+  embedUrl: string | null;
+  recommendedPlacement?: string;
+  targetUrl?: string;
 }) {
   const [activePlatform, setActivePlatform] = useState<PlatformTab>("html");
   const [copied, setCopied] = useState(false);
@@ -34,58 +157,14 @@ export function EmbedCodePanel({
   );
 
   const getSnippetForPlatform = (platform: PlatformTab): string => {
-    if (!embedCode || !deploymentUrl) return "";
-    switch (platform) {
-      case "react":
-        return `// React / Next.js
-export function MagnitaiTool() {
-  return (
-    <iframe
-      src="${deploymentUrl}"
-      title="Interactive tool"
-      width="100%"
-      height="640"
-      loading="lazy"
-      style={{ border: 0, width: "100%" }}
-    />
-  );
-}`;
-      case "webflow":
-        return `<!-- Webflow Custom Embed -->
-<div class="magnitai-tool" style="width:100%; min-height:640px">
-  <iframe
-    src="${deploymentUrl}"
-    title="Interactive tool"
-    width="100%"
-    height="640"
-    loading="lazy"
-    style="border:0; width:100%"
-  ></iframe>
-</div>`;
-      case "wordpress":
-        return `<!-- WordPress Custom HTML block -->
-<iframe
-  src="${deploymentUrl}"
-  title="Interactive tool"
-  width="100%"
-  height="640"
-  loading="lazy"
-  style="border:0; width:100%"
-></iframe>`;
-      case "shopify":
-        return `{% comment %} Shopify Custom Liquid section {% endcomment %}
-<iframe
-  src="${deploymentUrl}"
-  title="Interactive tool"
-  width="100%"
-  height="640"
-  loading="lazy"
-  style="border:0; width:100%"
-></iframe>`;
-      case "html":
-      default:
-        return embedCode;
-    }
+    if (!embedCode || !embedUrl) return "";
+    if (platform === "react") return reactSnippet(embedUrl);
+    // Every other platform accepts raw HTML, so it gets the identical snippet.
+    // The alternative — a hand-written iframe per platform — is how four of
+    // them ended up frozen at 640px while only the HTML one grew with its
+    // content, cutting off the result on a phone.
+    const header = PLATFORM_HEADER[platform];
+    return header ? `${header}\n${embedCode}` : embedCode;
   };
 
   const currentSnippet = getSnippetForPlatform(activePlatform);
@@ -102,7 +181,7 @@ export function MagnitaiTool() {
     }
   };
 
-  if (!embedCode || !deploymentUrl) {
+  if (!embedCode || !embedUrl) {
     return (
       <div className="rounded-[1.25rem] border border-dashed border-border-strong bg-background px-6 py-12 text-center">
         <span className="mx-auto grid size-11 place-items-center rounded-xl bg-secondary text-foreground">
@@ -133,7 +212,7 @@ export function MagnitaiTool() {
 
         <div className="flex items-center gap-2">
           <a
-            href={deploymentUrl}
+            href={embedUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="btn btn-secondary"
@@ -151,6 +230,24 @@ export function MagnitaiTool() {
           </button>
         </div>
       </div>
+
+      {recommendedPlacement ? (
+        <div className="flex items-start gap-3 border-b border-border bg-brand-wash px-5 py-4 sm:px-6">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-card text-foreground shadow-xs">
+            <MapPin className="size-4" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              Recommended placement: {recommendedPlacement}
+            </p>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {targetUrl
+                ? `This recommendation comes from the visitor decision Magnitai found on ${targetUrl.replace(/^https?:\/\//, "")}.`
+                : "This is where the tool best supports the visitor decision it was built for."}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="border-b border-border px-3 sm:px-5">
         <div className="flex overflow-x-auto" role="tablist" aria-label="Embed platform">
@@ -189,23 +286,25 @@ export function MagnitaiTool() {
           className="overflow-hidden rounded-[1.1rem] border border-inverse-border bg-inverse"
         >
           <div className="flex items-center justify-between border-b border-inverse-border px-4 py-3">
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-inverse-subtle">
-              {active.label}
-            </span>
+            <span className="group-label font-mono text-inverse-subtle">{active.label}</span>
             <span className="text-xs text-inverse-muted">{active.instruction}</span>
           </div>
-          <pre className="max-h-[28rem] overflow-auto p-4 text-[12px] leading-6 sm:p-5">
+          <pre className="max-h-[28rem] overflow-auto p-4 text-xs leading-6 sm:p-5">
             <code className="font-mono text-inverse-foreground">{currentSnippet}</code>
           </pre>
         </div>
       </div>
 
-      <div className="flex flex-col gap-1 border-t border-border px-5 py-4 text-xs leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <span>
-          Paste once. The snippet never changes; Magnitai keeps the hosted tool at that address up
-          to date.
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em]">Stable URL</span>
+      <div className="flex flex-col gap-3 border-t border-border px-5 py-4 text-xs leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        {widgetId ? (
+          <InstallationVerifier widgetId={widgetId} />
+        ) : (
+          <span>
+            Paste once. The snippet never changes; Magnitai keeps the hosted tool at that address up
+            to date.
+          </span>
+        )}
+        <span className="group-label font-mono">Stable URL</span>
       </div>
 
       <span aria-live="polite" className="sr-only">

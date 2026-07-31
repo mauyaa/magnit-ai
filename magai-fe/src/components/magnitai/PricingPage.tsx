@@ -16,7 +16,7 @@ import { MarketingFooter } from "./MarketingFooter";
 
 /** Presentation per tier. Only the recommended plan receives brand emphasis. */
 const CARD_STYLE: Record<string, { emphasis: "plain" | "brand"; cta: string }> = {
-  free: { emphasis: "plain", cta: "See my directions" },
+  free: { emphasis: "plain", cta: "Preview my lead magnet" },
   studio: { emphasis: "brand", cta: "Start with Studio" },
   scale: { emphasis: "plain", cta: "Start with Scale" },
 };
@@ -89,7 +89,7 @@ const FAQ = [
   {
     question: "Can I see what Magnitai would build before I pay?",
     answer:
-      "Yes. Magnitai reads your public website and presents two grounded directions without an account or a card. Payment starts only when you choose a direction to publish.",
+      "Yes. Magnitai reads your public website and presents two working lead magnets without an account or a card. Payment starts only when you choose one to publish.",
   },
   {
     question: "What happens when I cancel?",
@@ -134,6 +134,10 @@ function Cell({ value }: { value: string | boolean }) {
 export function PricingPage() {
   const { data, isLoading, isError, isFetching, refetch } = usePlans();
   const plans = data?.plans ?? [];
+  const singleToolPrice =
+    data?.single_tool_price !== undefined
+      ? formatPrice(data.single_tool_price, data.currency)
+      : null;
 
   if (isLoading) {
     return (
@@ -212,13 +216,13 @@ export function PricingPage() {
                 Pricing · No account to preview
               </span>
               <h1 className="mt-5 max-w-[14ch] text-balance font-display text-[clamp(3.2rem,6.3vw,6rem)] font-normal leading-[0.9] tracking-[-0.055em]">
-                Look for free. Pay when it goes live.
+                Start free. Pay when your lead magnet goes live.
               </h1>
             </div>
             <div className="border-t border-foreground pt-5 lg:mb-2">
               <p className="max-w-md text-base leading-7 text-muted-foreground">
-                Reading your website and proposing directions costs nothing. You pay when a tool is
-                ready to live on your site and collect real leads.
+                Magnitai reads your website and makes two working previews at no cost. Pay only when
+                you are ready to publish one and collect real leads.
               </p>
               <div className="mt-7 grid grid-cols-2 gap-5 text-sm">
                 <div>
@@ -325,6 +329,36 @@ export function PricingPage() {
             })}
           </div>
         </section>
+
+        {singleToolPrice ? (
+          <section className="border-b border-border bg-secondary/35">
+            <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-7 sm:flex-row sm:items-center sm:justify-between lg:px-8">
+              <div>
+                <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                  One-tool option
+                </span>
+                <h2 className="mt-2 text-lg font-medium tracking-[-0.025em] text-foreground">
+                  Only need this launch? Pay {singleToolPrice} once.
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  {/*
+                   * A one-off launch does capture leads — up to the cap it comes
+                   * with. Saying otherwise was not a simplification, it was
+                   * wrong, and the first thing a customer discovers after paying
+                   * should not be that the pricing page misdescribed what they
+                   * bought.
+                   */}
+                  One tool, built, published and capturing leads. Studio adds more tools, a higher
+                  lead ceiling, editing after launch, longer history and automatic repair.
+                </p>
+              </div>
+              <Link to="/build" className="btn btn-secondary shrink-0">
+                Preview the tool first
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
+            </div>
+          </section>
+        ) : null}
 
         <section className="mx-auto max-w-6xl px-6 py-20 lg:px-8 lg:py-28">
           <div className="grid gap-10 lg:grid-cols-[0.7fr_1.3fr]">

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -12,6 +13,9 @@ from collections.abc import Awaitable, Callable
 from app.platform.pipeline.schemas import DesignTokens
 from app.platform.pipeline.validation import (
     GeneratedCodeInvalid,
+    frozen_copy_in,
+    missing_milestones,
+    reads_live_config,
     respects_reduced_motion,
     uses_decision_runtime,
     uses_lead_capture,
@@ -133,6 +137,13 @@ POSTCSS_CONFIG = """export default {
     autoprefixer: {},
   },
 };
+"""
+
+# pnpm 11 blocks unreviewed dependency install scripts by default. Vite requires
+# esbuild's reviewed platform-binary installer, so approve that one package
+# explicitly while keeping every other dependency script denied.
+PNPM_WORKSPACE_CONFIG = """allowBuilds:
+  esbuild: true
 """
 
 INDEX_CSS = """@tailwind base;
@@ -287,13 +298,51 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 );
 """
 
-TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".template-project")
+_TEMPLATE_FINGERPRINT = hashlib.sha256(
+    (
+        json.dumps(PACKAGE_JSON_TEMPLATE, sort_keys=True)
+        + VITE_CONFIG
+        + TAILWIND_CONFIG
+        + POSTCSS_CONFIG
+        + PNPM_WORKSPACE_CONFIG
+    ).encode()
+).hexdigest()[:12]
+TEMPLATE_DIR = os.path.join(
+    tempfile.gettempdir(),
+    f"magnitai-widget-template-{_TEMPLATE_FINGERPRINT}",
+)
 
 
 # Serializes template creation within a worker process. Two builds starting
 # concurrently on a cold cache would otherwise both rmtree and re-install into the
 # same directory, and the loser would scaffold from a half-installed template.
 _template_lock = threading.Lock()
+
+
+def _pnpm_command(*args: str) -> list[str]:
+    """Use Corepack when available so a global wrapper cannot rewrite the project."""
+    corepack = shutil.which("corepack")
+    if corepack:
+        if os.name == "nt":
+            # ``shutil.which("corepack")`` can resolve the extensionless POSIX
+            # shim on Windows. CreateProcess cannot execute that shim, while the
+            # underlying Corepack JavaScript entry point is portable.
+            node = shutil.which("node")
+            corepack_js = os.path.join(
+                os.path.dirname(corepack),
+                "node_modules",
+                "corepack",
+                "dist",
+                "corepack.js",
+            )
+            if node and os.path.isfile(corepack_js):
+                return [node, corepack_js, "pnpm", *args]
+        return [corepack, "pnpm", *args]
+
+    pnpm = shutil.which("pnpm")
+    if not pnpm:
+        raise RuntimeError("pnpm is required to build widgets but was not found")
+    return [pnpm, *args]
 
 
 def _template_is_ready() -> bool:
@@ -327,13 +376,14 @@ def _ensure_template() -> str:
             ("vite.config.js", VITE_CONFIG),
             ("tailwind.config.js", TAILWIND_CONFIG),
             ("postcss.config.js", POSTCSS_CONFIG),
+            ("pnpm-workspace.yaml", PNPM_WORKSPACE_CONFIG),
         ]:
             with open(f"{staging}/{path}", "w", encoding="utf-8") as handle:
                 handle.write(content)
 
         # Fixed argument list, no shell: nothing here is caller-controlled.
-        result = subprocess.run(
-            ["pnpm", "install", "--prefer-offline"],  # noqa: S607
+        result = subprocess.run(  # noqa: S603
+            _pnpm_command("install", "--prefer-offline"),
             cwd=staging,
             capture_output=True,
             text=True,
@@ -342,8 +392,11 @@ def _ensure_template() -> str:
         )
         if result.returncode != 0:
             shutil.rmtree(staging, ignore_errors=True)
-            logger.error("pnpm install in template failed:\n%s", result.stderr[:2000])
-            raise RuntimeError(f"pnpm install failed for template:\n{result.stderr[:2000]}")
+            diagnostic = "\n".join(
+                output.strip() for output in (result.stdout, result.stderr) if output.strip()
+            )
+            logger.error("pnpm install in template failed:\n%s", diagnostic[:4000])
+            raise RuntimeError(f"pnpm install failed for template:\n{diagnostic[:4000]}")
 
         # Atomic-ish publish: the ready-marker directory only appears once the
         # install has fully succeeded.
@@ -359,6 +412,32 @@ def _write_file(path: str, content: str) -> None:
         os.makedirs(parent, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(content)
+
+
+def _install_project_dependencies(project_dir: str) -> None:
+    """Recreate pnpm's linked dependency graph inside one build sandbox.
+
+    Copying ``node_modules`` is not portable: pnpm intentionally represents much
+    of the graph with links, and Windows cannot reliably copy those links into a
+    different temporary directory. The template install has already warmed the
+    content-addressable store, so this locked offline materialization is fast,
+    deterministic, and network-independent.
+    """
+    result = subprocess.run(  # noqa: S603
+        _pnpm_command("install", "--offline", "--frozen-lockfile"),
+        cwd=project_dir,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+
+    diagnostic = "\n".join(
+        output.strip() for output in (result.stdout, result.stderr) if output.strip()
+    )
+    raise RuntimeError(f"pnpm could not materialize build dependencies:\n{diagnostic[:4000]}")
 
 
 def _scaffold_project(
@@ -381,17 +460,20 @@ def _scaffold_project(
     """
     template = _ensure_template()
 
+    has_warmed_dependencies = False
     for item in os.listdir(template):
         src = os.path.join(template, item)
         dst = os.path.join(project_dir, item)
         if item == "node_modules":
-            if not os.path.isdir(dst):
-                shutil.copytree(src, dst, symlinks=True)
+            has_warmed_dependencies = True
             continue
         if os.path.isdir(src):
             shutil.copytree(src, dst, dirs_exist_ok=True)
         else:
             shutil.copy2(src, dst)
+
+    if has_warmed_dependencies:
+        _install_project_dependencies(project_dir)
 
     fonts_href = google_fonts_href(design_tokens.css_variables or {})
 
@@ -443,7 +525,7 @@ async def _run_cmd(cmd: list[str], cwd: str, timeout_seconds: int = 180) -> tupl
 
 
 async def _run_build(project_dir: str) -> tuple[bool, str]:
-    code, stdout, stderr = await _run_cmd(["pnpm", "build"], project_dir)
+    code, stdout, stderr = await _run_cmd(_pnpm_command("build"), project_dir)
     if code != 0:
         # Vite writes some diagnostics to stdout, so include both streams or the
         # retry feedback can end up empty and useless to the model.
@@ -560,6 +642,62 @@ async def build_project(
                     "implementing or inventing calculation logic."
                 )
                 logger.warning("Attempt %d/%d - no decision runtime", attempt, max_attempts)
+                if attempt == max_attempts or not gen_callback:
+                    return False, last_error
+                files = await gen_callback(last_error)
+                continue
+
+            # The product tells owners their edits are live. That is only true if
+            # the deployed app reads the current configuration instead of the copy
+            # it was born with — so it is enforced here rather than requested in a
+            # prompt, exactly like lead capture.
+            if decision_spec is not None and not reads_live_config(validated):
+                last_error = (
+                    "The app never calls useLiveConfig() from './lib/magnitai.js'. "
+                    "Read the questions and the result copy from it — "
+                    "`const { decisionSpec, outcomes } = useLiveConfig();` — and "
+                    "render decisionSpec.questions rather than a list written into "
+                    "the component."
+                )
+                logger.warning("Attempt %d/%d - does not read live config", attempt, max_attempts)
+                if attempt == max_attempts or not gen_callback:
+                    return False, last_error
+                files = await gen_callback(last_error)
+                continue
+
+            # Asked for in the prompt for as long as there has been a funnel, and
+            # therefore present only when the model felt like it. A deploy that
+            # skipped these reported views and leads with nothing in between, and
+            # the owner read that as "nobody engaged".
+            absent = missing_milestones(validated)
+            if absent:
+                last_error = (
+                    "The app never reports "
+                    + ", ".join(f"{name}()" for name in absent)
+                    + " from './lib/magnitai.js'. Call trackStart() on the first "
+                    "answer, trackComplete(resultKey) when the inputs are done, and "
+                    "trackResult(resultKey) when the result becomes visible. Without "
+                    "them the owner's funnel is blank between views and leads."
+                )
+                logger.warning(
+                    "Attempt %d/%d - missing milestones %s", attempt, max_attempts, absent
+                )
+                if attempt == max_attempts or not gen_callback:
+                    return False, last_error
+                files = await gen_callback(last_error)
+                continue
+
+            frozen = frozen_copy_in(validated, decision_spec, outcomes)
+            if frozen:
+                quoted = "; ".join(f'"{text[:80]}"' for text in frozen[:3])
+                last_error = (
+                    "The app contains owner-editable copy as literal text, so an "
+                    f"edit to it would never reach a visitor: {quoted}. Render every "
+                    "question from decisionSpec.questions and every score band from "
+                    "outcomes.bands, both taken from useLiveConfig(). Do not write "
+                    "any of that wording into the component."
+                )
+                logger.warning("Attempt %d/%d - frozen owner copy", attempt, max_attempts)
                 if attempt == max_attempts or not gen_callback:
                     return False, last_error
                 files = await gen_callback(last_error)

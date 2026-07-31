@@ -32,24 +32,37 @@ TOKENS = DesignTokens(
     component_theme={"button_bg": "var(--color-primary)"},
 )
 
-# Passes validation, captures a lead, animates with an escape hatch, and defers
-# its arithmetic to the runtime — the shape every other case departs from.
+# Passes validation: captures a lead, animates with an escape hatch, defers its
+# arithmetic to the runtime, reports the funnel, and reads its questions from the
+# live configuration rather than from copy written into the component — the shape
+# every other case departs from.
 GOOD_APP = {
     "path": "src/App.jsx",
     "content": (
         "import React, { useState } from 'react';\n"
-        "import { submitLead, calculateDecision } from './lib/magnitai.js';\n"
+        "import { submitLead, calculateDecision, useLiveConfig, trackStart,\n"
+        "  trackComplete, trackResult } from './lib/magnitai.js';\n"
         "export default function App() {\n"
+        "  const { decisionSpec } = useLiveConfig();\n"
+        "  const questions = decisionSpec?.questions ?? [];\n"
         "  const r = calculateDecision({});\n"
-        "  const save = () => submitLead({ email: 'a@b.co' });\n"
+        "  const save = () => { trackStart(); trackComplete('x'); trackResult('x');\n"
+        "    return submitLead({ email: 'a@b.co' }); };\n"
         "  return <button className='transition-colors motion-reduce:transition-none'"
-        " onClick={save}>{r.value}</button>;\n"
+        " onClick={save}>{questions.length}{r.value}</button>;\n"
         "}\n"
     ),
 }
 
 
-def app_without(*, lead: bool = True, motion: bool = True, decision: bool = True) -> dict:
+def app_without(
+    *,
+    lead: bool = True,
+    motion: bool = True,
+    decision: bool = True,
+    live: bool = True,
+    milestones: bool = True,
+) -> dict:
     """The good app with one requirement deliberately removed."""
     content = GOOD_APP["content"]
     if not lead:
@@ -58,6 +71,10 @@ def app_without(*, lead: bool = True, motion: bool = True, decision: bool = True
         content = content.replace(" motion-reduce:transition-none", "")
     if not decision:
         content = content.replace("calculateDecision({})", "({ value: 1 })")
+    if not live:
+        content = content.replace("useLiveConfig()", "({ decisionSpec: null })")
+    if not milestones:
+        content = content.replace("trackComplete('x'); ", "")
     return {"path": "src/App.jsx", "content": content}
 
 
@@ -183,6 +200,23 @@ class TestFilesystemHelpers:
         assert (dst / "index.html").is_file()
         assert not (dst / "node_modules").exists()
 
+    def test_dependency_graph_is_materialized_offline_from_the_lockfile(
+        self, monkeypatch, tmp_path
+    ):
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return builder.subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr(builder, "_pnpm_command", lambda *args: ["pnpm", *args])
+        monkeypatch.setattr(builder.subprocess, "run", fake_run)
+
+        builder._install_project_dependencies(str(tmp_path))
+
+        assert calls[0][0] == ["pnpm", "install", "--offline", "--frozen-lockfile"]
+        assert calls[0][1]["cwd"] == str(tmp_path)
+
 
 # --------------------------------------------------------------------------- #
 # The retry loop
@@ -269,6 +303,71 @@ class TestBuildProject:
 
         assert ok is False
         assert "calculateDecision(answers)" in reason
+
+    async def test_an_app_that_never_reads_the_live_config_is_rejected(self):
+        """Otherwise "your edit is live" is a claim with nothing behind it.
+
+        The runtime hands the app the owner's current questions, but nothing
+        stopped a generation from rendering the ones it was born with. The
+        visible questions and the scored questions then drift apart silently:
+        calculateDecision uses the new spec, the screen shows the old one.
+        """
+        ok, reason = await run_build(
+            [app_without(live=False)], decision_spec={"mechanism": "estimate"}
+        )
+
+        assert ok is False
+        assert "useLiveConfig()" in reason
+
+    async def test_owner_editable_copy_written_into_the_source_is_rejected(self):
+        """The subtler half: it imports the config and hardcodes the copy anyway."""
+        spec = {
+            "mechanism": "estimate",
+            "questions": [{"id": "q1", "label": "How many patients do you see each month?"}],
+        }
+        hardcoded = {
+            "path": "src/App.jsx",
+            "content": GOOD_APP["content"].replace(
+                "{questions.length}", "How many patients do you see each month?"
+            ),
+        }
+
+        ok, reason = await run_build([hardcoded], decision_spec=spec)
+
+        assert ok is False
+        assert "How many patients do you see each month?" in reason
+        assert "decisionSpec.questions" in reason
+
+    async def test_the_models_own_copy_is_not_treated_as_frozen(self, monkeypatch, stub_scaffold):
+        """Only owner-editable content is restricted; the app still writes prose."""
+        monkeypatch.setattr(builder, "_run_build", _build_result(True))
+        monkeypatch.setattr(os.path, "isfile", lambda path: True)
+
+        prose = {
+            "path": "src/App.jsx",
+            "content": GOOD_APP["content"].replace(
+                "{questions.length}", "Answer four questions to see your estimate"
+            ),
+        }
+
+        ok, _ = await run_build(
+            [prose],
+            decision_spec={
+                "mechanism": "estimate",
+                "questions": [{"id": "q1", "label": "How many patients per month?"}],
+            },
+        )
+
+        assert ok is True
+
+    async def test_a_missing_funnel_milestone_is_rejected(self):
+        """A deploy without these reports views and leads and nothing between them."""
+        ok, reason = await run_build(
+            [app_without(milestones=False)], decision_spec={"mechanism": "estimate"}
+        )
+
+        assert ok is False
+        assert "trackComplete()" in reason
 
     async def test_compiler_errors_are_the_retry_feedback(self, monkeypatch, stub_scaffold):
         monkeypatch.setattr(os.path, "isfile", lambda path: True)

@@ -13,10 +13,13 @@ from app.features.payments.schemas import (
     CreateCheckoutResponse,
     CreateSubscriptionCheckoutRequest,
     PaymentResponse,
+    ReconcileCheckoutRequest,
+    ReconcileCheckoutResponse,
     SubscriptionResponse,
     WebhookResponse,
 )
 from app.features.payments.service import (
+    CheckoutSessionNotFound,
     PaymentProviderError,
     create_checkout_session,
     create_subscription_checkout_session,
@@ -26,11 +29,14 @@ from app.features.payments.service import (
     handle_subscription_changed,
     handle_subscription_checkout_completed,
     list_user_payments,
+    reconcile_checkout_session,
+    reconcile_subscription_session,
     subscription_summary,
 )
 from app.features.widgets.service import WidgetNotFound, get_owned_widget
 from app.platform.config.settings import settings
 from app.platform.db.session import get_async_session
+from app.platform.observability.metrics import product_activation_events_total
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +104,7 @@ async def create_checkout(
         ) from None
 
     widget.entitlement_status = "checkout_pending"
+    product_activation_events_total.labels("one_time_checkout", "started").inc()
     return CreateCheckoutResponse(checkout_url=url, session_id=session_id)
 
 
@@ -128,7 +135,39 @@ async def create_subscription_checkout(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="payment_provider_error",
         ) from None
+    product_activation_events_total.labels("subscription_checkout", "started").inc()
     return CreateCheckoutResponse(checkout_url=url, session_id=session_id)
+
+
+@router.post(
+    "/checkout/{session_id}/reconcile",
+    response_model=ReconcileCheckoutResponse,
+)
+async def reconcile_checkout(
+    session_id: str,
+    payload: ReconcileCheckoutRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_async_session),
+) -> ReconcileCheckoutResponse:
+    """Settle a checkout the customer just came back from.
+
+    Stripe's webhook is authoritative and unchanged; this exists because the
+    customer arrives back before it does — and, when they cancel, potentially
+    hours before it does. Scoped to the caller's own sessions, and the answer is
+    read from Stripe rather than from the query string the browser carried back.
+    """
+    reconcile = (
+        reconcile_subscription_session
+        if payload.kind == "subscription"
+        else reconcile_checkout_session
+    )
+    try:
+        outcome = await reconcile(db, user_id=user.workspace_id, session_id=session_id)
+    except CheckoutSessionNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="checkout_session_not_found"
+        ) from None
+    return ReconcileCheckoutResponse(outcome=outcome)
 
 
 @router.post("/stripe/webhook", response_model=WebhookResponse)

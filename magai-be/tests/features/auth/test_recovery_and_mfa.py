@@ -299,7 +299,7 @@ class TestTotp:
         uri = provisioning_uri("ABCDEFGHIJKLMNOP", "user@example.com")
         assert uri.startswith("otpauth://totp/")
         assert "secret=ABCDEFGHIJKLMNOP" in uri
-        assert "issuer=MagnetAI" in uri
+        assert "issuer=Magnitai" in uri
         assert "digits=6" in uri and "period=30" in uri
 
 

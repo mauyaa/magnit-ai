@@ -155,10 +155,45 @@ Import `trackStart`, `trackProgress`, `trackComplete`, `trackResult`, and
 - trackCta() immediately before the result CTA is followed
 The runtime handles impressions, visitor sessions, attribution, and iframe height.
 
+trackStart, trackComplete and trackResult are REQUIRED. A build that omits any
+of them is rejected and regenerated: without them the owner's funnel shows
+visitors and leads with nothing in between, which reads as a tool nobody used.
+
+THE CONFIGURATION IS LIVE — READ IT, DO NOT COPY IT:
+The owner can edit their questions, score bands and result advice after this app
+is built, and the product tells them the change is live immediately. That is only
+true if you render from the running configuration:
+
+    import { useLiveConfig, calculateDecision } from './lib/magnitai.js';
+
+    const { decisionSpec, outcomes, consentText, ctaUrl } = useLiveConfig();
+    const questions = decisionSpec?.questions ?? [];
+
+    {questions.map((question) => (
+      <fieldset key={question.id}>
+        <legend>{question.label}</legend>
+        …
+      </fieldset>
+    ))}
+
+MANDATORY, AND CHECKED:
+- Call useLiveConfig() and render every question from decisionSpec.questions.
+- Render score-band labels and advice from `outcomes`, never from your own copy.
+- Do NOT write any question wording, band label, band description or advice line
+  into the component as literal text. A build containing that copy verbatim is
+  rejected, because an owner editing it would change the score while the visitor
+  kept seeing the old wording.
+- Your own framing — headings, transitions, button labels, empty states — is
+  yours to write. It is only the owner-editable content that must be read.
+- The lists arrive before the visitor can answer anything, but not necessarily
+  before your first render: handle an empty question list without crashing.
+
 TRUTH AND CALCULATION:
-- The `DECISION SPEC` is authoritative. Render its exact questions and results.
+- The `DECISION SPEC` below tells you the SHAPE to design for — how many
+  questions, what kind of inputs, what the result looks like. The values you
+  render at runtime come from useLiveConfig(), not from this document.
 - Import and call `calculateDecision(answers)` from `./lib/magnitai.js`; its
-  returned value/result/qualified fields are authoritative.
+  returned value/result/band/advice fields are authoritative.
 - Do not reimplement the calculation or invent benchmarks, uplift, savings,
   percentages, scores, or customer evidence.
 - Preserve answer ids and submit the full answer map through submitLead().

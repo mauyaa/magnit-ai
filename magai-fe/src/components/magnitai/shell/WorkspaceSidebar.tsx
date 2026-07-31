@@ -99,9 +99,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
           ))}
         </div>
 
-        <p className="px-2.5 pb-1.5 pt-5 text-[10px] font-medium uppercase tracking-[0.12em] text-inverse-subtle">
-          Set up
-        </p>
+        <p className="group-label px-2.5 pb-1.5 pt-5 text-inverse-subtle">Set up</p>
         <div className="space-y-0.5">
           {WORKSPACE_SETUP_NAV.map((destination) => (
             <NavLink
@@ -141,7 +139,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
               {entitlements.plan.name}
             </span>
             {entitlements.status === "past_due" && (
-              <span className="text-[11px] font-medium text-warning">Payment failed</span>
+              <span className="text-xs font-medium text-warning">Payment failed</span>
             )}
           </div>
 
@@ -166,7 +164,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
               to="/dashboard/settings"
               hash="billing"
               onClick={onNavigate}
-              className="block text-[11px] font-medium text-brand-on-inverse hover:underline"
+              className="block text-xs font-medium text-brand-on-inverse hover:underline"
             >
               Upgrade plan
             </Link>

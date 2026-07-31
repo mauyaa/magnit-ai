@@ -1,5 +1,7 @@
 import { ArrowRight, Check, Globe2, Loader2 } from "lucide-react";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+
+import { normalizeWebsiteUrl } from "@/lib/website-url";
 
 const NEXT_STEPS = [
   {
@@ -9,13 +11,13 @@ const NEXT_STEPS = [
   },
   {
     number: "02",
-    title: "AI chooses the format",
-    detail: "The strongest calculator, quiz or audit for that page.",
+    title: "We recommend the format",
+    detail: "The calculator, quiz or audit that best fits that page.",
   },
   {
     number: "03",
-    title: "You review the result",
-    detail: "Nothing is published until you approve it.",
+    title: "You try two complete options",
+    detail: "Preview the visitor result before you sign up.",
   },
 ] as const;
 
@@ -23,6 +25,7 @@ export function BuildPathChooser({
   initialSite,
   pending,
   requestError,
+  resumedDomain,
   onStart,
   onCustomize,
   onClearError,
@@ -31,6 +34,13 @@ export function BuildPathChooser({
   initialSite?: string;
   pending: boolean;
   requestError?: string | null;
+  /**
+   * Set when the customer came back to a draft that was analysed but never
+   * taken further. There are no concepts to restore at that point, so the
+   * continuity that can honestly be offered is the site itself — which is a
+   * great deal better than an empty form and no explanation.
+   */
+  resumedDomain?: string | null;
   onStart: (url: string) => void;
   onCustomize: (url: string) => void;
   onClearError?: () => void;
@@ -41,20 +51,30 @@ export function BuildPathChooser({
   const inputRef = useRef<HTMLInputElement>(null);
   const message = error ?? requestError;
 
-  function normalizedSite(): string | null {
-    const trimmed = site
-      .trim()
-      .replace(/^https?:\/\//i, "")
-      .replace(/\/+$/, "");
+  /*
+   * A resumed draft arrives after this screen has already mounted, and seeding
+   * state on mount alone means the field stays empty — so the page says "pick
+   * up where you left off" and then asks for the URL again anyway. Adopted only
+   * while the field is untouched: whatever the customer has typed outranks
+   * anything we recover.
+   */
+  useEffect(() => {
+    if (initialSite && !site) setSite(initialSite);
+    // `site` is deliberately absent: this must not re-run as they type, or
+    // clearing the field would immediately refill it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSite]);
 
-    if (!trimmed || !trimmed.includes(".")) {
+  function normalizedSite(): string | null {
+    const normalized = normalizeWebsiteUrl(site);
+    if (!normalized) {
       setError("Enter a complete website, like northsidedental.com");
       inputRef.current?.focus();
       return null;
     }
 
     setError(null);
-    return `https://${trimmed}`;
+    return normalized;
   }
 
   function begin(event: FormEvent) {
@@ -81,7 +101,7 @@ export function BuildPathChooser({
         </button>
 
         <div className="mt-7 flex items-center justify-between gap-6 text-[11px] font-medium text-muted-foreground">
-          <span className="uppercase tracking-[0.12em]">AI conversion builder</span>
+          <span className="uppercase tracking-[0.12em]">Lead magnet builder</span>
           <span>Step 1 of 3 · Website</span>
         </div>
         <div className="mt-3 h-0.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
@@ -93,11 +113,14 @@ export function BuildPathChooser({
             id="build-entry-title"
             className="max-w-[17ch] font-heading text-[clamp(2.55rem,5.5vw,4.25rem)] font-medium leading-[0.96] tracking-[-0.055em] text-foreground"
           >
-            Build your next lead magnet from one page.
+            {resumedDomain
+              ? "Pick up where you left off."
+              : "Build the right lead magnet from one website page."}
           </h1>
           <p className="mt-5 max-w-[39rem] text-[15px] leading-7 text-muted-foreground sm:text-lg sm:leading-8">
-            Paste the exact page where visitors learn about your offer. Magnitai will recommend the
-            strongest calculator, quiz or audit for that audience.
+            {resumedDomain
+              ? `You read ${resumedDomain} but never chose a direction. Continue and Magnitai will recommend one.`
+              : "Paste the exact page where visitors learn about your offer. Magnitai will recommend the strongest calculator, quiz or audit for that audience."}
           </p>
 
           <form onSubmit={begin} className="mt-8 sm:mt-9">
@@ -147,12 +170,12 @@ export function BuildPathChooser({
               >
                 {pending ? (
                   <>
-                    Building
+                    Creating previews
                     <Loader2 className="size-4 animate-spin" aria-hidden="true" />
                   </>
                 ) : (
                   <>
-                    Build for me
+                    Recommend my lead magnet
                     <ArrowRight
                       className="size-4 transition-transform group-hover:translate-x-0.5"
                       aria-hidden="true"
@@ -178,9 +201,9 @@ export function BuildPathChooser({
 
             <div className="mt-7 flex flex-col items-start justify-between gap-4 border-t border-border pt-6 sm:flex-row sm:items-center">
               <div>
-                <p className="text-sm font-medium text-foreground">Want to shape the direction?</p>
+                <p className="text-sm font-medium text-foreground">Know what you want to build?</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Set the audience, outcome and questions before AI builds.
+                  Set the audience, outcome and questions before Magnitai recommends it.
                 </p>
               </div>
               <button
@@ -189,7 +212,7 @@ export function BuildPathChooser({
                 disabled={pending}
                 className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-card px-4 text-sm font-semibold text-foreground transition hover:border-foreground/40 hover:bg-secondary disabled:pointer-events-none disabled:opacity-60"
               >
-                Build with me
+                Shape it with me
                 <ArrowRight className="size-4" aria-hidden="true" />
               </button>
             </div>

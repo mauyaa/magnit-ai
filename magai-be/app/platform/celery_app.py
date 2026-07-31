@@ -43,6 +43,18 @@ celery_app.conf.update(
     worker_max_tasks_per_child=50,
     task_soft_time_limit=900,
     task_time_limit=1080,
+    # API callers poll Postgres and never consume task results. Fail fast when
+    # queue infrastructure is unavailable instead of blocking an HTTP request
+    # inside Celery's producer/result retry loops.
+    task_ignore_result=True,
+    task_publish_retry=False,
+    broker_connection_timeout=1,
+    broker_transport_options={
+        "socket_connect_timeout": settings.redis_timeout_seconds,
+        "socket_timeout": settings.redis_timeout_seconds,
+        "retry_on_timeout": False,
+        "max_retries": 0,
+    },
     broker_connection_retry_on_startup=True,
     result_expires=86400,
 )
@@ -54,6 +66,14 @@ if settings.self_heal_enabled:
             "schedule": settings.self_heal_interval_minutes * 60,
             # Drop a tick rather than stacking sweeps if beat falls behind.
             "options": {"expires": settings.self_heal_interval_minutes * 60},
+        },
+        # Every minute, because the first retry is a minute out and a lead that
+        # was not delivered is the one failure in this product a customer feels
+        # directly. The sweep is a no-op when the outbox is empty.
+        "lead-delivery-sweep": {
+            "task": "app.platform.pipeline.tasks.run_lead_delivery_sweep",
+            "schedule": 60,
+            "options": {"expires": 55},
         },
     }
 

@@ -20,13 +20,17 @@ import stripe
 
 from app.features.payments.models import Payment, Subscription
 from app.features.payments.service import (
+    CheckoutSessionNotFound,
     PaymentProviderError,
+    create_checkout_session,
     handle_checkout_completed,
     handle_checkout_expired,
     handle_payment_refunded,
     handle_subscription_changed,
     handle_subscription_checkout_completed,
     plan_terms,
+    reconcile_checkout_session,
+    reconcile_subscription_session,
     subscription_summary,
 )
 from app.features.widgets.models import Widget
@@ -116,6 +120,32 @@ class TestCheckoutCompleted:
         assert await handle_checkout_completed(db, "cs_unpaid") is False
         await db.refresh(payment)
         assert payment.status == "pending"
+
+
+class TestCheckoutCreation:
+    async def test_checkout_uses_the_customer_facing_product_name(self, db, user, monkeypatch):
+        widget = await _widget(db, user)
+        captured: dict = {}
+
+        def create(**kwargs):
+            captured.update(kwargs)
+            return StripeSession(
+                id="cs_brand",
+                url="https://checkout.stripe.com/c/pay/cs_brand",
+            )
+
+        monkeypatch.setattr(stripe.checkout.Session, "create", create)
+
+        await create_checkout_session(
+            db,
+            user.id,
+            widget.id,
+            "https://app.example/success",
+            "https://app.example/cancel",
+        )
+
+        product = captured["line_items"][0]["price_data"]["product_data"]
+        assert product["name"] == "Magnitai decision tool launch"
 
     async def test_an_expanded_payment_intent_is_stored_as_its_id(self, db, user, monkeypatch):
         """Storing the object's repr here would break every later refund lookup."""
@@ -397,3 +427,166 @@ class TestSubscriptionSummary:
         _, active, _, _ = await subscription_summary(db, user.id)
 
         assert active == 1
+
+
+class TestCheckoutReconciliation:
+    """The customer's own return trip, used as a settlement signal.
+
+    Creating a session marks the widget ``checkout_pending`` and disables the
+    build button. Before reconciliation existed, only Stripe could clear that —
+    so pressing "back" on the payment page produced a tool the customer had not
+    paid for and could no longer build, for as long as Stripe took to expire the
+    session. These cover the outcomes that decide whether they are stuck.
+    """
+
+    async def test_an_abandoned_open_session_releases_the_widget(self, db, user, monkeypatch):
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        payment = await _payment(db, user, widget_id=widget.id, stripe_session_id="cs_open")
+
+        monkeypatch.setattr(
+            stripe.checkout.Session,
+            "retrieve",
+            lambda *a, **k: StripeSession(payment_status="unpaid", status="open"),
+        )
+
+        outcome = await reconcile_checkout_session(db, user_id=user.id, session_id="cs_open")
+        await db.commit()
+        await db.refresh(widget)
+        await db.refresh(payment)
+
+        assert outcome == "released"
+        assert widget.entitlement_status == "preview"
+        # Still open, so still payable from the same URL — do not bury it.
+        assert payment.status == "pending"
+
+    async def test_an_expired_session_fails_the_payment_and_releases(self, db, user, monkeypatch):
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        payment = await _payment(db, user, widget_id=widget.id, stripe_session_id="cs_dead")
+
+        monkeypatch.setattr(
+            stripe.checkout.Session,
+            "retrieve",
+            lambda *a, **k: StripeSession(payment_status="unpaid", status="expired"),
+        )
+
+        outcome = await reconcile_checkout_session(db, user_id=user.id, session_id="cs_dead")
+        await db.commit()
+        await db.refresh(widget)
+        await db.refresh(payment)
+
+        assert outcome == "released"
+        assert widget.entitlement_status == "preview"
+        assert payment.status == "failed"
+
+    async def test_a_paid_session_grants_before_the_webhook_lands(self, db, user, monkeypatch):
+        """The customer is back and waiting; the webhook may still be in flight."""
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        payment = await _payment(db, user, widget_id=widget.id, stripe_session_id="cs_paid")
+
+        monkeypatch.setattr(
+            stripe.checkout.Session,
+            "retrieve",
+            lambda *a, **k: StripeSession(
+                payment_status="paid",
+                status="complete",
+                payment_intent="pi_ok",
+                amount_total=settings.widget_launch_price_cents,
+            ),
+        )
+
+        outcome = await reconcile_checkout_session(db, user_id=user.id, session_id="cs_paid")
+        await db.commit()
+        await db.refresh(widget)
+        await db.refresh(payment)
+
+        assert outcome == "paid"
+        assert widget.entitlement_status == "paid"
+        assert payment.status == "confirmed"
+
+    async def test_a_tampered_amount_is_not_granted_on_the_return_trip(self, db, user, monkeypatch):
+        """Reconciliation must not be a cheaper door into the same entitlement."""
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        await _payment(db, user, widget_id=widget.id, stripe_session_id="cs_cheap_return")
+
+        monkeypatch.setattr(
+            stripe.checkout.Session,
+            "retrieve",
+            lambda *a, **k: StripeSession(
+                payment_status="paid", status="complete", payment_intent="pi_x", amount_total=1
+            ),
+        )
+
+        outcome = await reconcile_checkout_session(
+            db, user_id=user.id, session_id="cs_cheap_return"
+        )
+        await db.commit()
+        await db.refresh(widget)
+
+        assert outcome == "pending"
+        assert widget.entitlement_status == "checkout_pending"
+
+    async def test_stripe_being_unreachable_changes_nothing(self, db, user, monkeypatch):
+        """Not hearing back is not evidence of non-payment."""
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        await _payment(db, user, widget_id=widget.id, stripe_session_id="cs_offline")
+
+        def boom(*args, **kwargs):
+            raise stripe.StripeError("api down")
+
+        monkeypatch.setattr(stripe.checkout.Session, "retrieve", boom)
+
+        outcome = await reconcile_checkout_session(db, user_id=user.id, session_id="cs_offline")
+        await db.refresh(widget)
+
+        assert outcome == "pending"
+        assert widget.entitlement_status == "checkout_pending"
+
+    async def test_an_already_confirmed_session_is_idempotent(self, db, user, monkeypatch):
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        await _payment(
+            db,
+            user,
+            widget_id=widget.id,
+            stripe_session_id="cs_done",
+            status="confirmed",
+            confirmed_at=datetime.now(UTC),
+        )
+
+        def never(*args, **kwargs):
+            raise AssertionError("a confirmed payment must not be re-read from Stripe")
+
+        monkeypatch.setattr(stripe.checkout.Session, "retrieve", never)
+
+        outcome = await reconcile_checkout_session(db, user_id=user.id, session_id="cs_done")
+        await db.commit()
+        await db.refresh(widget)
+
+        assert outcome == "paid"
+        assert widget.entitlement_status == "paid"
+
+    async def test_another_workspaces_session_is_not_visible(self, db, user, other_user):
+        """The session id is the only handle; it must not work across tenants."""
+        widget = await _widget(db, user, entitlement_status="checkout_pending")
+        await _payment(db, user, widget_id=widget.id, stripe_session_id="cs_theirs")
+
+        with pytest.raises(CheckoutSessionNotFound):
+            await reconcile_checkout_session(db, user_id=other_user.id, session_id="cs_theirs")
+
+    async def test_an_abandoned_plan_checkout_stops_reading_as_pending(self, db, user, monkeypatch):
+        subscription = Subscription(user_id=user.id, plan="studio", status="checkout_pending")
+        subscription.stripe_session_id = "cs_plan"
+        db.add(subscription)
+        await db.commit()
+
+        monkeypatch.setattr(
+            stripe.checkout.Session,
+            "retrieve",
+            lambda *a, **k: StripeSession(payment_status="unpaid", status="expired"),
+        )
+
+        outcome = await reconcile_subscription_session(db, user_id=user.id, session_id="cs_plan")
+        await db.commit()
+        await db.refresh(subscription)
+
+        assert outcome == "released"
+        assert subscription.status == "canceled"

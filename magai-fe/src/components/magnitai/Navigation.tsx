@@ -33,7 +33,7 @@ export type MagnitaiSection =
 
 const MARKETING = [
   { id: "how-it-works", label: "How it works", to: "/how-it-works" },
-  { id: "examples", label: "What we build", to: "/examples" },
+  { id: "examples", label: "Examples", to: "/examples" },
   { id: "pricing", label: "Pricing", to: "/pricing" },
 ] as const;
 
@@ -59,7 +59,6 @@ export function Navigation({ activeSection }: { activeSection: MagnitaiSection }
         >
           <MagnitaiLogo
             size="md"
-            showWordmark={false}
             variant="plain"
             className="isolate overflow-hidden rounded-[10px] bg-background [&_img]:mix-blend-multiply"
           />
@@ -104,13 +103,21 @@ export function Navigation({ activeSection }: { activeSection: MagnitaiSection }
               </button>
             </>
           ) : (
-            <Link
-              to="/login"
-              className="group hidden h-10 items-center gap-2 rounded-full bg-foreground px-5 text-[13px] font-medium tracking-[0.04em] text-background shadow-raised transition-colors hover:bg-ink-soft sm:inline-flex"
-            >
-              Log in
-              <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-            </Link>
+            <>
+              <Link
+                to="/login"
+                className="hidden h-10 items-center px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              >
+                Log in
+              </Link>
+              <Link
+                to="/build"
+                className="group hidden h-10 items-center gap-2 rounded-full bg-foreground px-5 text-[13px] font-medium text-background shadow-raised transition-colors hover:bg-ink-soft sm:inline-flex"
+              >
+                Build free
+                <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+              </Link>
+            </>
           )}
 
           <button
@@ -156,13 +163,22 @@ export function Navigation({ activeSection }: { activeSection: MagnitaiSection }
               </button>
             </>
           ) : (
-            <Link
-              to="/login"
-              onClick={() => setMenuOpen(false)}
-              className="btn btn-primary mt-3 w-full"
-            >
-              Log in
-            </Link>
+            <>
+              <Link
+                to="/build"
+                onClick={() => setMenuOpen(false)}
+                className="btn btn-primary mt-3 w-full"
+              >
+                Build free
+              </Link>
+              <Link
+                to="/login"
+                onClick={() => setMenuOpen(false)}
+                className="btn btn-ghost mt-2 w-full"
+              >
+                Log in
+              </Link>
+            </>
           )}
         </nav>
       )}

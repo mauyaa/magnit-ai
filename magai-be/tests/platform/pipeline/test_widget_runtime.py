@@ -155,6 +155,9 @@ class TestRuntimeConfig:
 
 
 class TestRuntimeSdk:
+    def test_imports_the_sibling_config_from_the_parent_directory(self):
+        assert "from '../config.js'" in RUNTIME_SDK_JS
+
     def test_posts_to_the_lead_endpoint(self):
         # The core loop: this is the call that was entirely absent before.
         assert "/api/leads/${widgetId}" in RUNTIME_SDK_JS
@@ -186,3 +189,21 @@ class TestRuntimeSdk:
     def test_reports_iframe_height_to_the_host_page(self):
         assert "ResizeObserver" in RUNTIME_SDK_JS
         assert "magnit:resize" in RUNTIME_SDK_JS
+
+    def test_offers_the_live_configuration_as_a_react_value(self):
+        """The hook every generated app renders from.
+
+        Exposing the configuration only as a getter was not enough: a component
+        that read it during its first render kept whatever was baked in, because
+        the overlay resolves afterwards and nothing told React to re-render.
+        That is how an owner's edit reached the scoring but never the screen.
+        """
+        assert "export function useLiveConfig" in RUNTIME_SDK_JS
+        assert "useSyncExternalStore" in RUNTIME_SDK_JS
+        assert "from 'react'" in RUNTIME_SDK_JS
+
+    def test_the_overlay_replaces_the_configuration_rather_than_mutating_it(self):
+        # useSyncExternalStore compares snapshots by identity. Mutating in place
+        # would leave every subscriber rendering the previous copy.
+        assert "live = {" in RUNTIME_SDK_JS
+        assert "getLiveConfig" in RUNTIME_SDK_JS

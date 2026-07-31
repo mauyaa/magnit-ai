@@ -25,7 +25,8 @@ export function loadSavedJourney(): SavedJourney | null {
       !parsed ||
       !parsed.session_token ||
       !Array.isArray(parsed.concepts) ||
-      parsed.concepts.length !== 2
+      parsed.concepts.length < 1 ||
+      parsed.concepts.length > 2
     ) {
       return null;
     }

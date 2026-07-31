@@ -15,8 +15,13 @@ from app.features.widgets.outcomes import derive_outcome_config
 from app.platform.clients.deployment import deploy_directory
 from app.platform.config.settings import settings
 from app.platform.db.session import async_session_factory
+from app.platform.observability.metrics import generation_provider_total
 from app.platform.pipeline.builder import build_project
 from app.platform.pipeline.events import events as event_manager
+from app.platform.pipeline.fallback_widget import (
+    fallback_design_tokens,
+    fallback_widget_code,
+)
 from app.platform.pipeline.schemas import (
     ArchitectOutput,
     Blueprint,
@@ -158,6 +163,7 @@ async def _codegen_with_retry(
     widget_type: WidgetType,
     widget_title: str,
     max_attempts: int = 3,
+    force_fallback: bool = False,
 ) -> tuple[WidgetCode, str]:
     """Generate the app, then prove it builds and captures leads before accepting it.
 
@@ -215,7 +221,35 @@ async def _codegen_with_retry(
         "Generating app component...",
         progress=55.0,
     )
-    widget_code = await _gen()
+    using_fallback = False
+
+    async def _fallback(reason: str) -> WidgetCode:
+        nonlocal using_fallback
+        if not using_fallback:
+            generation_provider_total.labels("codegen", "fallback").inc()
+        using_fallback = True
+        logger.warning(
+            "Code generation unavailable for widget %s; using verified fallback: %s",
+            widget_id,
+            reason[:500],
+        )
+        await event_manager.publish_stage(
+            widget_id,
+            "codegen",
+            "active",
+            "Building the verified visitor experience...",
+            progress=60.0,
+        )
+        return fallback_widget_code(design_tokens)
+
+    if force_fallback:
+        widget_code = await _fallback("The generation provider is unavailable for this build.")
+    else:
+        try:
+            widget_code = await _gen()
+            generation_provider_total.labels("codegen", "model").inc()
+        except Exception as exc:
+            widget_code = await _fallback(str(exc))
 
     async def _retry_callback(reason: str) -> list[dict]:
         nonlocal widget_code
@@ -227,7 +261,12 @@ async def _codegen_with_retry(
             "Fixing issues found while validating the generated app...",
             progress=60.0,
         )
-        widget_code = await _gen(feedback=reason)
+        if not using_fallback:
+            try:
+                widget_code = await _gen(feedback=reason)
+                generation_provider_total.labels("codegen", "model").inc()
+            except Exception as exc:
+                widget_code = await _fallback(str(exc))
         return [f.model_dump() for f in widget_code.files]
 
     project_dir = os.path.join(settings.widgets_dir, f"build_{widget_id}")
@@ -255,8 +294,8 @@ async def _codegen_with_retry(
         outcomes=derive_outcome_config(
             architect_output.decision, architect_output.copywriting
         ).model_dump(mode="json"),
-        max_attempts=max_attempts,
-        gen_callback=_retry_callback,
+        max_attempts=1 if using_fallback else max_attempts,
+        gen_callback=None if using_fallback else _retry_callback,
     )
 
     if not success:
@@ -339,6 +378,7 @@ async def generate_and_deploy(
         progress=35.0,
     )
     stitch_started = time.perf_counter()
+    generation_provider_unavailable = False
     try:
         async with _make_agent(
             system_instructions=STITCHER_SYSTEM_PROMPT,
@@ -356,6 +396,7 @@ async def generate_and_deploy(
             widget_id=widget_id,
         )
     except Exception as exc:
+        generation_provider_unavailable = True
         await record_generation_usage(
             stage="stitcher",
             input_value=architect_output,
@@ -364,7 +405,21 @@ async def generate_and_deploy(
             succeeded=False,
             error_code=type(exc).__name__,
         )
-        raise
+        generation_provider_total.labels("stitcher", "fallback").inc()
+        logger.warning(
+            "Design-token generation unavailable for widget %s; preserving observed brand",
+            widget_id,
+        )
+        design_tokens = fallback_design_tokens(architect_output)
+        await event_manager.publish_stage(
+            widget_id,
+            "stitcher",
+            "active",
+            "Applying the confirmed brand directly...",
+            progress=45.0,
+        )
+    else:
+        generation_provider_total.labels("stitcher", "model").inc()
 
     if token_overrides:
         # The workspace brand kit wins over what the Stitcher chose. Applied here
@@ -388,7 +443,12 @@ async def generate_and_deploy(
     await _update_build_progress(widget_id, build_stage="codegen", build_progress=55.0)
 
     widget_code, project_dir = await _codegen_with_retry(
-        widget_id, architect_output, design_tokens, widget_type, widget_title
+        widget_id,
+        architect_output,
+        design_tokens,
+        widget_type,
+        widget_title,
+        force_fallback=generation_provider_unavailable,
     )
 
     # No local serving step: widgets are served from their own Vercel deployment,

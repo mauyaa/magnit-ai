@@ -28,7 +28,7 @@ describe("GuidedBuilder", () => {
     setup();
 
     expect(screen.getByLabelText(/what should magnitai build/i)).toBeInTheDocument();
-    expect(await screen.findAllByRole("button", { name: /^ai decides$/i })).toHaveLength(8);
+    expect(await screen.findAllByRole("button", { name: /^magnitai decides$/i })).toHaveLength(8);
     expect(screen.getByText("0", { selector: "span" })).toBeInTheDocument();
     expect(screen.getByText("8", { selector: "span" })).toBeInTheDocument();
   });
@@ -37,10 +37,12 @@ describe("GuidedBuilder", () => {
     setup();
     const audience = block(/audience/i);
 
-    await userEvent.click(within(audience).getByRole("button", { name: /^ai decides$/i }));
+    await userEvent.click(within(audience).getByRole("button", { name: /^magnitai decides$/i }));
 
     expect(await within(audience).findByRole("textbox", { name: /audience/i })).toBeInTheDocument();
-    expect(within(audience).getByRole("button", { name: /let ai decide/i })).toBeInTheDocument();
+    expect(
+      within(audience).getByRole("button", { name: /let magnitai decide/i }),
+    ).toBeInTheDocument();
   });
 
   it("tracks user direction without treating delegated choices as incomplete", async () => {
@@ -51,13 +53,11 @@ describe("GuidedBuilder", () => {
     );
 
     const tone = block(/tone/i);
-    await userEvent.click(within(tone).getByRole("button", { name: /^ai decides$/i }));
+    await userEvent.click(within(tone).getByRole("button", { name: /^magnitai decides$/i }));
 
     expect(screen.getByText(/core idea/i)).toBeInTheDocument();
     expect(
-      within(screen.getByRole("complementary", { name: /collaboration summary/i })).getByText(
-        "Tone",
-      ),
+      within(screen.getByRole("complementary", { name: /lead magnet brief/i })).getByText("Tone"),
     ).toBeInTheDocument();
     expect(screen.getByText("2", { selector: "span" })).toBeInTheDocument();
     expect(screen.getByText("7", { selector: "span" })).toBeInTheDocument();
@@ -71,20 +71,20 @@ describe("GuidedBuilder", () => {
     );
 
     const audience = block(/audience/i);
-    await userEvent.click(within(audience).getByRole("button", { name: /^ai decides$/i }));
+    await userEvent.click(within(audience).getByRole("button", { name: /^magnitai decides$/i }));
     await userEvent.type(
       within(audience).getByRole("textbox", { name: /audience/i }),
       "Operations leaders",
     );
 
     const offer = block(/^offer$/i);
-    await userEvent.click(within(offer).getByRole("button", { name: /^ai decides$/i }));
+    await userEvent.click(within(offer).getByRole("button", { name: /^magnitai decides$/i }));
     await userEvent.type(
       within(offer).getByRole("textbox", { name: /offer/i }),
       "A free workflow review",
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /build my directions/i }));
+    await userEvent.click(screen.getByRole("button", { name: /create my lead magnets/i }));
 
     expect(onBuild).toHaveBeenCalledTimes(1);
     const brief = onBuild.mock.calls[0][0];
@@ -98,14 +98,14 @@ describe("GuidedBuilder", () => {
   it("discards a value when the user hands that detail back to AI", async () => {
     const onBuild = setup();
     const audience = block(/audience/i);
-    await userEvent.click(within(audience).getByRole("button", { name: /^ai decides$/i }));
+    await userEvent.click(within(audience).getByRole("button", { name: /^magnitai decides$/i }));
     await userEvent.type(
       within(audience).getByRole("textbox", { name: /audience/i }),
       "Homeowners",
     );
-    await userEvent.click(within(audience).getByRole("button", { name: /let ai decide/i }));
+    await userEvent.click(within(audience).getByRole("button", { name: /let magnitai decide/i }));
 
-    await userEvent.click(screen.getByRole("button", { name: /build my directions/i }));
+    await userEvent.click(screen.getByRole("button", { name: /create my lead magnets/i }));
     expect(onBuild.mock.calls[0][0].audience).toBe("");
   });
 
@@ -116,7 +116,7 @@ describe("GuidedBuilder", () => {
       "Never mention pricing",
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /build my directions/i }));
+    await userEvent.click(screen.getByRole("button", { name: /create my lead magnets/i }));
     expect(onBuild.mock.calls[0][0].instructions).toBe("Never mention pricing");
   });
 

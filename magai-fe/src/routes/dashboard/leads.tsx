@@ -5,7 +5,13 @@ import { useMemo, useState } from "react";
 import { RequireAuth } from "@/components/magnitai/RequireAuth";
 import { PageHeader } from "@/components/magnitai/shell/PageHeader";
 import { WorkspaceShell } from "@/components/magnitai/shell/WorkspaceShell";
-import { useAllLeads, useWidgets, type LeadData, type WidgetData } from "@/lib/api";
+import {
+  downloadLeadsCsv,
+  useWidgets,
+  useWorkspaceLeads,
+  type LeadStatus,
+  type WidgetData,
+} from "@/lib/api";
 import { PlanGate } from "@/lib/plan";
 
 export const Route = createFileRoute("/dashboard/leads")({
@@ -51,10 +57,6 @@ function relativeDay(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function csvCell(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
 /**
  * A score is a number between 0 and 100, so it can be shown as one.
  *
@@ -83,7 +85,7 @@ function ScoreCell({ score }: { score: number | null }) {
  * "New" is deliberately the quietest: a table where every untouched row shouts
  * is a table nobody can triage.
  */
-function StatusChip({ status }: { status: LeadData["status"] }) {
+function StatusChip({ status }: { status: LeadStatus }) {
   const style = {
     new: "bg-n-100 text-n-600",
     contacted: "bg-info/12 text-info",
@@ -139,43 +141,41 @@ const NO_WIDGETS: WidgetData[] = [];
 
 function DashboardLeads() {
   const { data: widgetsData } = useWidgets();
-  // Memoised because it is a dependency of `widgetMap` below; `?? []` allocates
-  // a new array every render, which defeats every memo downstream of it.
+  // Memoised because `?? []` allocates a new array every render, which defeats
+  // every memo downstream of it.
   const widgets = useMemo(() => widgetsData?.widgets ?? NO_WIDGETS, [widgetsData]);
-  const { data: leads, isLoading } = useAllLeads(widgets.map((w) => w.id));
 
   const [query, setQuery] = useState("");
   const [toolFilter, setToolFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  const widgetMap = useMemo(() => new Map(widgets.map((w) => [w.id, w])), [widgets]);
-  const allLeads = useMemo(() => leads ?? [], [leads]);
+  /*
+   * Filtering, sorting, counting and paging all happen on the server.
+   *
+   * This screen used to do all four in the browser, over every lead the
+   * workspace had ever captured, fetched as one unpaginated request per tool
+   * with the failures discarded. That is fine with three leads and wrong at the
+   * volumes the plans sell — and its failure mode was the worst one available,
+   * because a dropped request looked exactly like an empty inbox.
+   */
+  const filters = {
+    widgetId: toolFilter,
+    query,
+    sort: sortKey,
+    direction,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  } as const;
+  const { data, isLoading } = useWorkspaceLeads(filters);
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const filtered = allLeads.filter((lead) => {
-      if (toolFilter !== "all" && lead.widget_id !== toolFilter) return false;
-      if (!needle) return true;
-      return (
-        lead.email.toLowerCase().includes(needle) ||
-        (lead.name ?? "").toLowerCase().includes(needle)
-      );
-    });
-
-    const compare = (a: LeadData, b: LeadData) => {
-      if (sortKey === "score") return (a.score ?? -1) - (b.score ?? -1);
-      if (sortKey === "email") return a.email.localeCompare(b.email);
-      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    };
-
-    return [...filtered].sort((a, b) => (direction === "asc" ? compare(a, b) : compare(b, a)));
-  }, [allLeads, query, toolFilter, sortKey, direction]);
-
-  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const rows = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const isFiltered = Boolean(query.trim()) || toolFilter !== "all";
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
-  const rows = visible.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -186,31 +186,6 @@ function DashboardLeads() {
       setDirection(key === "email" ? "asc" : "desc");
     }
     setPage(0);
-  };
-
-  // Exports what is on screen, not the whole table: a filter you can see but
-  // that the download silently ignores is a trap.
-  const exportCsv = () => {
-    const rowsOut = visible.map((lead) =>
-      [
-        lead.email,
-        lead.name || "",
-        lead.score ?? "",
-        widgetMap.get(lead.widget_id)?.title || lead.widget_id,
-        new Date(lead.created_at).toISOString(),
-      ]
-        .map((value) => csvCell(String(value)))
-        .join(","),
-    );
-    const blob = new Blob([["Email,Name,Score,Tool,Captured", ...rowsOut].join("\n")], {
-      type: "text/csv",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `magnitai-leads-${new Date().toISOString().slice(0, 10)}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
   };
 
   if (isLoading) {
@@ -228,12 +203,12 @@ function DashboardLeads() {
       <PageHeader
         title="Leads"
         description={
-          allLeads.length === 0
+          total === 0 && !isFiltered
             ? "People who leave their details in one of your tools land here."
-            : `${allLeads.length} ${allLeads.length === 1 ? "person has" : "people have"} left their details.`
+            : `${total.toLocaleString()} ${total === 1 ? "person has" : "people have"} left their details.`
         }
         actions={
-          allLeads.length > 0 ? (
+          total > 0 || isFiltered ? (
             <PlanGate
               feature="csv_export"
               fallback={
@@ -242,7 +217,22 @@ function DashboardLeads() {
                 </span>
               }
             >
-              <button type="button" onClick={exportCsv} className="btn btn-secondary h-9 text-sm">
+              {/* A real download from the server, honouring every filter on
+                  screen. Built in the browser it could only ever contain the
+                  page currently loaded — twenty-five rows out of a filtered
+                  three thousand, with nothing to say so. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setExportError(null);
+                  downloadLeadsCsv(filters).catch((problem: unknown) =>
+                    setExportError(
+                      problem instanceof Error ? problem.message : "We couldn't build that export.",
+                    ),
+                  );
+                }}
+                className="btn btn-secondary h-9 text-sm"
+              >
                 <Download className="size-4" aria-hidden="true" />
                 Export CSV
               </button>
@@ -251,7 +241,7 @@ function DashboardLeads() {
         }
       />
 
-      {allLeads.length === 0 ? (
+      {total === 0 && !isFiltered ? (
         <div className="surface mx-auto max-w-md px-6 py-14 text-center">
           <span className="mx-auto grid size-11 place-items-center rounded-xl bg-secondary">
             <Users className="size-5 text-foreground" aria-hidden="true" />
@@ -303,14 +293,19 @@ function DashboardLeads() {
               ))}
             </select>
 
+            {exportError && (
+              <p role="alert" className="text-xs text-destructive sm:ml-auto">
+                {exportError}
+              </p>
+            )}
+
             <span className="text-xs text-muted-foreground sm:ml-auto">
-              {visible.length === allLeads.length
-                ? `${allLeads.length} leads`
-                : `${visible.length} of ${allLeads.length}`}
+              {total.toLocaleString()} {total === 1 ? "lead" : "leads"}
+              {isFiltered ? " match" : ""}
             </span>
           </div>
 
-          {visible.length === 0 ? (
+          {rows.length === 0 ? (
             <p className="px-4 py-14 text-center text-sm text-muted-foreground">
               No leads match that search.
             </p>
@@ -389,7 +384,7 @@ function DashboardLeads() {
                             params={{ widgetId: lead.widget_id }}
                             className="text-muted-foreground hover:text-foreground hover:underline"
                           >
-                            {widgetMap.get(lead.widget_id)?.title || lead.widget_id.slice(0, 8)}
+                            {lead.widget_title || lead.widget_id.slice(0, 8)}
                           </Link>
                         </td>
                         <td className="px-4 py-3 text-right text-sm text-muted-foreground">
@@ -404,8 +399,8 @@ function DashboardLeads() {
               {pageCount > 1 && (
                 <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-3">
                   <span className="text-xs text-muted-foreground">
-                    {safePage * PAGE_SIZE + 1}–
-                    {Math.min((safePage + 1) * PAGE_SIZE, visible.length)} of {visible.length}
+                    {safePage * PAGE_SIZE + 1}–{safePage * PAGE_SIZE + rows.length} of{" "}
+                    {total.toLocaleString()}
                   </span>
                   <div className="flex gap-2">
                     <button

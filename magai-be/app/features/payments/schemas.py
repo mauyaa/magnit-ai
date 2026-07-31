@@ -32,6 +32,22 @@ class SubscriptionResponse(BaseModel):
     current_period_end: str | None = None
 
 
+class ReconcileCheckoutRequest(BaseModel):
+    """Which checkout the browser is returning from.
+
+    ``kind`` is a hint about where to look the session up, not a claim about its
+    outcome — the outcome is always read back from Stripe.
+    """
+
+    kind: Literal["one_time", "subscription"] = "one_time"
+
+
+class ReconcileCheckoutResponse(BaseModel):
+    # paid: entitled, go ahead. pending: Stripe is still deciding, or was
+    # unreachable. released: nothing was charged and the tool is buildable again.
+    outcome: Literal["paid", "pending", "released"]
+
+
 class WebhookResponse(BaseModel):
     received: bool
 

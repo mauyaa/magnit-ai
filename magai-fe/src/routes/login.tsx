@@ -67,7 +67,7 @@ function LoginPage() {
         onSuccess={() => navigate({ to: destination, replace: true })}
         onSwitchMode={() => setMode((current) => (current === "login" ? "signup" : "login"))}
         contextMessage={
-          destination === "/build" ? "Your direction is ready. Sign in to continue." : undefined
+          destination === "/build" ? "Your lead magnet is ready. Sign in to continue." : undefined
         }
         handoff={handoff}
       />

@@ -97,6 +97,10 @@ ignore = [
 # Agent prompts are prose data, not code. Re-wrapping a prompt to satisfy a line
 # length changes the text the model actually receives, so leave them intact.
 "app/platform/pipeline/states/*" = ["E501"]
+# This module contains the shipped JSX source for the provider-degraded build.
+# Reflowing Tailwind class strings to satisfy Python line length changes the
+# generated artifact rather than improving the Python around it.
+"app/platform/pipeline/fallback_widget.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.13"

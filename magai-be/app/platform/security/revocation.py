@@ -13,6 +13,7 @@ every use, so a disabled account cannot be resurrected by a cache outage.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 
 import redis.asyncio as aioredis
@@ -22,8 +23,10 @@ from app.platform.config.settings import settings
 logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "revoked_jti:"
+_RETRY_COOLDOWN_SECONDS = 5.0
 
 _pool: aioredis.ConnectionPool | None = None
+_redis_retry_after = 0.0
 
 
 def _redis() -> aioredis.Redis:
@@ -43,19 +46,34 @@ def _redis() -> aioredis.Redis:
 
 
 async def revoke(jti: str, expires_at: datetime) -> None:
+    global _redis_retry_after
     ttl = int((expires_at - datetime.now(UTC)).total_seconds())
     if ttl <= 0:
         return  # Already expired; nothing to deny.
+    if time.monotonic() < _redis_retry_after:
+        return
     try:
         await _redis().setex(f"{_KEY_PREFIX}{jti}", ttl, "1")
-    except Exception:
-        logger.exception("Failed to revoke token %s — it stays valid until it expires", jti)
+    except Exception as exc:
+        _redis_retry_after = time.monotonic() + _RETRY_COOLDOWN_SECONDS
+        logger.warning(
+            "Redis revocation store unavailable; token remains valid until expiry (%s)",
+            type(exc).__name__,
+        )
 
 
 async def is_revoked(jti: str) -> bool:
+    global _redis_retry_after
+    if time.monotonic() < _redis_retry_after:
+        return False
     try:
         found = await _redis().exists(f"{_KEY_PREFIX}{jti}")
+        _redis_retry_after = 0.0
         return int(found) > 0
-    except Exception:
-        logger.exception("Revocation check failed for %s — treating token as valid", jti)
+    except Exception as exc:
+        _redis_retry_after = time.monotonic() + _RETRY_COOLDOWN_SECONDS
+        logger.warning(
+            "Redis revocation checks unavailable; relying on access-token expiry (%s)",
+            type(exc).__name__,
+        )
         return False

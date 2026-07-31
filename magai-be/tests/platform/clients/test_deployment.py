@@ -97,8 +97,36 @@ class TestDeployDirectory:
         # resolves it relative to the customer's own page.
         assert result.url == "https://magai-widget-abcdef12.vercel.app"
         assert result.widget_id == "abcdef1234567890"
-        assert seen["json"]["name"] == "magai-widget-abcdef12"
+        assert seen["json"]["name"] == "magai-widget-abcdef1234567890"
         assert seen["json"]["target"] == "production"
+
+    async def test_the_embed_address_is_the_project_alias_not_this_build(
+        self, monkeypatch, tmp_path
+    ):
+        """The one property the snippet on a customer's website depends on.
+
+        Vercel mints a fresh hostname for every deployment. Handing that to a
+        customer means their page keeps serving one frozen build, and silently
+        breaks on any provider-side cleanup. The project alias always resolves
+        to whatever is currently live, which is what "paste this once" means.
+        """
+        (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+        seen: dict = {}
+
+        async def fake_post(self, url, **kwargs):
+            seen["json"] = kwargs.get("json")
+            return _response(200, {"url": "magai-widget-w-9f8e7d6.vercel.app", "id": "dpl_99"})
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+        result = await deployment.deploy_directory(str(tmp_path), "abcdef1234567890")
+
+        assert result.url == "https://magai-widget-w-9f8e7d6.vercel.app"
+        assert result.embed_url == "https://magai-widget-abcdef1234567890.vercel.app"
+        assert result.provider_deployment_id == "dpl_99"
+        # Requested explicitly, so a failure to assign it is a failed deploy
+        # rather than a tool nobody can embed.
+        assert seen["json"]["alias"] == ["magai-widget-abcdef1234567890.vercel.app"]
 
     async def test_project_is_taken_out_of_sso_after_deploy(self, monkeypatch, tmp_path):
         """A protected project renders a login page inside the customer's iframe."""
@@ -181,11 +209,32 @@ class TestDeployDirectory:
 class TestProjectDomains:
     def test_project_name_is_derived_from_the_widget_id(self):
         """Deploys and domain calls must agree on the project, or they target different ones."""
-        assert deployment._project_name("abcdef1234567890") == "magai-widget-abcdef12"
+        assert deployment._project_name("abcdef1234567890") == "magai-widget-abcdef1234567890"
+
+    def test_the_whole_id_is_used_so_two_tools_cannot_share_a_project(self):
+        """A truncated id is a shared hostname between unrelated customers.
+
+        One project per tool is what makes the alias a safe permanent address.
+        If two ids collapsed to the same project name, one customer's publish
+        would replace what the other customer's website is serving.
+        """
+        first = "3f6b1a52-9c1e-4a1f-9f0b-2c0f5d7a1b34"
+        second = "3f6b1a52-0000-0000-0000-000000000000"
+
+        assert deployment._project_name(first) != deployment._project_name(second)
+
+    def test_the_alias_follows_the_project_name(self):
+        widget_id = "3F6B1A52-9C1E-4A1F-9F0B-2C0F5D7A1B34"
+        assert deployment._stable_alias(widget_id) == (
+            f"{deployment._project_name(widget_id)}.vercel.app"
+        )
+        # Vercel hostnames are lowercase; an id with capitals must not produce a
+        # hostname the browser will normalise into a different one.
+        assert deployment._stable_alias(widget_id).islower()
 
     async def test_add_domain_returns_vercels_payload(self, monkeypatch):
         async def fake_post(self, url, **kwargs):
-            assert url.endswith("/v10/projects/magai-widget-abcdef12/domains")
+            assert url.endswith("/v10/projects/magai-widget-abcdef1234/domains")
             assert kwargs["json"] == {"name": "tools.example.com"}
             return _response(200, {"name": "tools.example.com", "verified": False})
 

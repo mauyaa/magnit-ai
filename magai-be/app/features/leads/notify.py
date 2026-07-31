@@ -66,57 +66,72 @@ async def post_signed_webhook(
     return not response.is_redirect and response.status_code < 300, response.status_code
 
 
+async def _deliver_webhook(
+    db: AsyncSession, lead_id: uuid.UUID, delivery_id: uuid.UUID | None
+) -> bool:
+    row = (
+        await db.execute(
+            select(Lead, Widget).join(Widget, Lead.widget_id == Widget.id).where(Lead.id == lead_id)
+        )
+    ).first()
+    if row is None:
+        return False
+    lead, widget = row
+    if not widget.delivery_webhook_url or not widget.delivery_webhook_secret:
+        return False
+
+    payload = {
+        "event": "lead.created",
+        # The outbox row's id. A receiver that saw this delivery before can
+        # recognise a retry after an ambiguous timeout instead of filing the
+        # same person twice.
+        "delivery_id": str(delivery_id) if delivery_id else None,
+        "lead": {
+            "id": str(lead.id),
+            "widget_id": str(widget.id),
+            "email": lead.email,
+            "name": lead.name,
+            "score": lead.score,
+            "answers": lead.answers,
+            "metadata": lead.extra_meta,
+            "created_at": lead.created_at.isoformat(),
+        },
+    }
+    delivered, status_code = await post_signed_webhook(
+        widget.delivery_webhook_url,
+        widget.delivery_webhook_secret,
+        "lead.created",
+        payload,
+    )
+    if not delivered:
+        logger.warning("Lead webhook returned %s for widget %s", status_code, widget.id)
+        return False
+    lead.forwarded = True
+    lead.forwarded_at = datetime.now(UTC)
+    return True
+
+
 async def deliver_lead_webhook(
     lead_id: uuid.UUID,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    db: AsyncSession | None = None,
+    delivery_id: uuid.UUID | None = None,
 ) -> bool:
-    """Deliver a signed lead payload to the customer's configured endpoint."""
-    factory = session_factory or async_session_factory
-    try:
-        async with factory() as db:
-            row = (
-                await db.execute(
-                    select(Lead, Widget)
-                    .join(Widget, Lead.widget_id == Widget.id)
-                    .where(Lead.id == lead_id)
-                )
-            ).first()
-            if row is None:
-                return False
-            lead, widget = row
-            if not widget.delivery_webhook_url or not widget.delivery_webhook_secret:
-                return False
+    """Deliver a signed lead payload to the customer's configured endpoint.
 
-            payload = {
-                "event": "lead.created",
-                "lead": {
-                    "id": str(lead.id),
-                    "widget_id": str(widget.id),
-                    "email": lead.email,
-                    "name": lead.name,
-                    "score": lead.score,
-                    "answers": lead.answers,
-                    "metadata": lead.extra_meta,
-                    "created_at": lead.created_at.isoformat(),
-                },
-            }
-            delivered, status_code = await post_signed_webhook(
-                widget.delivery_webhook_url,
-                widget.delivery_webhook_secret,
-                "lead.created",
-                payload,
-            )
-            if not delivered:
-                logger.warning(
-                    "Lead webhook returned %s for widget %s",
-                    status_code,
-                    widget.id,
-                )
-                return False
-            lead.forwarded = True
-            lead.forwarded_at = datetime.now(UTC)
-            await db.commit()
-            return True
+    ``db`` is supplied by the outbox, which owns the transaction and records the
+    attempt alongside this result. Without it the function opens and commits its
+    own session, which is how the direct callers and the tests use it.
+    """
+    try:
+        if db is not None:
+            return await _deliver_webhook(db, lead_id, delivery_id)
+        factory = session_factory or async_session_factory
+        async with factory() as own:
+            delivered = await _deliver_webhook(own, lead_id, delivery_id)
+            if delivered:
+                await own.commit()
+            return delivered
     except UnsafeTargetURL:
         logger.warning("Blocked unsafe lead webhook for lead %s", lead_id)
         return False
@@ -125,9 +140,65 @@ async def deliver_lead_webhook(
         return False
 
 
+class NotificationNotWanted(Exception):
+    """The owner asked not to be emailed, or cannot be. Not a delivery failure."""
+
+
+async def _lead_notification(db: AsyncSession, lead_id: uuid.UUID) -> tuple[str, str, str, str]:
+    row = (
+        await db.execute(
+            select(Lead, Widget, User)
+            .join(Widget, Lead.widget_id == Widget.id)
+            .join(User, Widget.user_id == User.id)
+            .where(Lead.id == lead_id)
+        )
+    ).first()
+
+    if row is None:
+        logger.warning("Lead %s vanished before its notification could be sent", lead_id)
+        raise NotificationNotWanted()
+
+    lead, widget, owner = row
+
+    if not owner.notify_on_lead or not owner.is_active:
+        raise NotificationNotWanted()
+    if not owner.email_verified:
+        # Mailing an unconfirmed address risks sending a stranger's contact
+        # details to whoever actually owns that inbox.
+        logger.info("Skipping lead notification: owner %s is unverified", owner.id)
+        raise NotificationNotWanted()
+
+    subject, text, body = new_lead_email(
+        lead_email=lead.email,
+        lead_name=lead.name,
+        widget_title=widget.title,
+        widget_id=str(widget.id),
+        lead_id=str(lead.id),
+        score=lead.score,
+    )
+    return owner.email, subject, text, body
+
+
+async def attempt_owner_notification(db: AsyncSession, lead_id: uuid.UUID) -> str:
+    """The outbox's view of this channel: ``delivered``, ``skipped`` or ``failed``.
+
+    ``skipped`` is a real outcome and not a softer word for failure. An owner who
+    turned notifications off, or whose address is unconfirmed, is owed nothing —
+    retrying that on a backoff schedule for the rest of the day would be a bug
+    dressed up as diligence.
+    """
+    try:
+        recipient, subject, text, body = await _lead_notification(db, lead_id)
+    except NotificationNotWanted:
+        return "skipped"
+    await send_email(recipient, subject, text, body)
+    return "delivered"
+
+
 async def notify_owner_of_lead(
     lead_id: uuid.UUID,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    db: AsyncSession | None = None,
 ) -> bool:
     """Email the widget's owner about one captured lead.
 
@@ -135,45 +206,21 @@ async def notify_owner_of_lead(
     caller is serving an anonymous visitor who must not see our mail problems.
 
     ``session_factory`` exists so tests can point this at their own database;
-    production always takes the default.
+    ``db`` is passed by the outbox, which owns the transaction.
     """
-    factory = session_factory or async_session_factory
     try:
-        async with factory() as db:
-            row = (
-                await db.execute(
-                    select(Lead, Widget, User)
-                    .join(Widget, Lead.widget_id == Widget.id)
-                    .join(User, Widget.user_id == User.id)
-                    .where(Lead.id == lead_id)
-                )
-            ).first()
+        if db is not None:
+            recipient, subject, text, body = await _lead_notification(db, lead_id)
+        else:
+            factory = session_factory or async_session_factory
+            async with factory() as own:
+                recipient, subject, text, body = await _lead_notification(own, lead_id)
 
-            if row is None:
-                logger.warning("Lead %s vanished before its notification could be sent", lead_id)
-                return False
-
-            lead, widget, owner = row
-
-            if not owner.notify_on_lead or not owner.is_active:
-                return False
-            if not owner.email_verified:
-                # Mailing an unconfirmed address risks sending a stranger's
-                # contact details to whoever actually owns that inbox.
-                logger.info("Skipping lead notification: owner %s is unverified", owner.id)
-                return False
-
-            subject, text, body = new_lead_email(
-                lead_email=lead.email,
-                lead_name=lead.name,
-                widget_title=widget.title,
-                widget_id=str(widget.id),
-                score=lead.score,
-            )
-
-        await send_email(owner.email, subject, text, body)
+        await send_email(recipient, subject, text, body)
         return True
 
+    except NotificationNotWanted:
+        return False
     except Exception:
         # Deliberately broad. Nothing that happens in here is worth a 500 on a
         # customer's own website.

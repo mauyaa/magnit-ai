@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { LeadDeliveryPanel } from "@/components/magnitai/LeadDeliveryPanel";
 import { RequireAuth } from "@/components/magnitai/RequireAuth";
 import { PageHeader } from "@/components/magnitai/shell/PageHeader";
 import { WorkspaceShell } from "@/components/magnitai/shell/WorkspaceShell";
@@ -188,9 +189,22 @@ function LeadDetailScreen() {
           </div>
         }
         actions={
-          <a href={`mailto:${lead.email}`} className="btn btn-primary h-9 text-sm">
+          <a
+            href={`mailto:${lead.email}`}
+            onClick={() => {
+              /*
+               * Opening the mail client and marking the lead contacted are the
+               * same act. Leaving them apart meant the pipeline only ever
+               * reflected the follow-ups someone remembered to record by hand,
+               * so "New" stopped meaning anything and the queue stopped being
+               * worth opening.
+               */
+              if (lead.status === "new") update.mutate({ leadId, status: "contacted" });
+            }}
+            className="btn btn-primary h-9 text-sm"
+          >
             <Mail className="size-4" aria-hidden="true" />
-            Email them
+            {lead.status === "new" ? "Email them" : "Email again"}
           </a>
         }
       />
@@ -297,6 +311,8 @@ function LeadDetailScreen() {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-24">
+          <LeadDeliveryPanel leadId={leadId} deliveries={data.deliveries} />
+
           <section className="surface p-5">
             <h2 className="text-sm font-medium text-foreground">Score</h2>
             {lead.score === null ? (

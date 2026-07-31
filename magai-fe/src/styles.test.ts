@@ -154,6 +154,25 @@ describe("button system", () => {
     }
   });
 
+  it("lets a caller size a button without fighting specificity", () => {
+    /*
+     * `.btn` used to declare `font-size` normally, which beat Tailwind's own
+     * type scale. Every one of the 79 places that wrote `btn ... text-sm` or
+     * `btn ... text-xs` therefore rendered at the same 15px, so quiet
+     * secondary actions shouted at exactly the volume of the primary one — and
+     * nothing in the markup showed it, because the class was right there.
+     *
+     * Stated inside `:where()` the default carries zero specificity: `.btn`
+     * alone still sizes itself, and a utility beside it wins.
+     */
+    const zeroSpecificity = CSS.slice(CSS.indexOf(":where(.btn)"));
+    const block = zeroSpecificity.slice(0, zeroSpecificity.indexOf("}"));
+    expect(block).toContain("font-size");
+
+    const btnBlock = CSS.slice(CSS.indexOf("\n  .btn {"));
+    expect(btnBlock.slice(0, btnBlock.indexOf("}"))).not.toContain("font-size");
+  });
+
   it("gives the primary and accent buttons a real hover state", () => {
     // After the accent change, `hover:bg-primary` on a `bg-foreground` button
     // became a no-op — every primary action in the product had quietly lost its
@@ -262,6 +281,97 @@ describe("the landing CTA green", () => {
         const body = readFileSync(file, "utf8").toLowerCase();
         return RETIRED.filter((hex) => body.includes(hex)).map((hex) => `${file}: ${hex}`);
       });
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * The small caps label.
+ *
+ * The workspace had seven versions of one label — 9, 10 and 11px crossed with
+ * five letter-spacings, three weights and both families — because each screen
+ * re-derived it instead of reaching for a class. Nobody chose those
+ * differences. They accumulated, and the result was a product that felt
+ * approximate without any single screen being wrong, which is the hardest kind
+ * of inconsistency to argue anyone into fixing.
+ *
+ * Scoped to the workspace on purpose. The marketing pages have their own voice
+ * and are not covered here; this is the ground a customer works on every day,
+ * and it is the ground that has to be quiet.
+ */
+describe("the workspace's small caps label", () => {
+  const WORKSPACE = [
+    "src/routes/dashboard",
+    "src/routes/analytics.tsx",
+    "src/components/magnitai/shell",
+    "src/components/magnitai/EmbedCodePanel.tsx",
+    "src/components/magnitai/PublishChecklist.tsx",
+    "src/components/magnitai/LeadDeliveryPanel.tsx",
+  ];
+
+  const workspaceFiles = async (): Promise<string[]> => {
+    const { readdirSync, statSync, existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    const walk = (target: string): string[] => {
+      if (!existsSync(target)) return [];
+      if (!statSync(target).isDirectory()) {
+        return /\.tsx?$/.test(target) && !target.includes(".test.") ? [target] : [];
+      }
+      return readdirSync(target).flatMap((entry) => walk(join(target, entry)));
+    };
+
+    return WORKSPACE.flatMap((entry) => walk(resolve(process.cwd(), entry)));
+  };
+
+  it("is defined once, as a class", () => {
+    expect(CSS.match(/\.group-label\s*\{/g)).toHaveLength(1);
+  });
+
+  it("decides the typography and leaves the colour to the surface", () => {
+    // This label sits on paper, on ink panels and on a customer's own brand
+    // colour. Baking one colour in would force every caller to override it,
+    // which is how a shared class quietly becomes seven again.
+    const block = CSS.slice(CSS.indexOf(".group-label {"));
+    const body = block.slice(0, block.indexOf("}"));
+
+    expect(body).toContain("text-transform: uppercase");
+    expect(body).toContain("letter-spacing");
+    expect(body).toContain("font-size");
+    expect(body).not.toContain("color:");
+  });
+
+  it("is not hand-rolled anywhere in the workspace", async () => {
+    const offenders: string[] = [];
+    for (const file of await workspaceFiles()) {
+      const body = readFileSync(file, "utf8");
+      // A tracked, uppercased label written out by hand rather than named.
+      for (const match of body.match(/uppercase tracking-\[[^\]]+\]/g) ?? []) {
+        offenders.push(`${file}: ${match}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("does not reintroduce an off-scale type size on a workspace screen", async () => {
+    /*
+     * 9, 10, 11 and 12px were all written by hand as captions, between and
+     * below the scale's own caption step. Four unnamed sizes doing one job,
+     * none of them chosen — each was simply what fitted the box that day.
+     *
+     * A bracketed pixel size is the tell. If a screen genuinely needs a step
+     * the scale does not have, the scale should gain it by name rather than
+     * one component quietly inventing it.
+     */
+    const offenders: string[] = [];
+    for (const file of await workspaceFiles()) {
+      const body = readFileSync(file, "utf8");
+      for (const match of body.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []) {
+        offenders.push(`${file}: ${match}`);
+      }
+    }
 
     expect(offenders).toEqual([]);
   });

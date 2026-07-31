@@ -222,6 +222,14 @@ export function DecisionPreview({
           </strong>
           <h3 className="mt-5 text-xl font-semibold tracking-[-0.035em]">{result.title}</h3>
           <p className="mt-2 text-xs leading-5 opacity-65">{result.summary}</p>
+          {result.recommendation ? (
+            <div className="mt-4 rounded-xl border border-current/15 p-3.5">
+              <span className="block text-[9px] font-medium uppercase tracking-[0.14em] opacity-50">
+                Recommended next step
+              </span>
+              <p className="mt-1.5 text-xs leading-5 opacity-75">{result.recommendation}</p>
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => setAnswers({})}

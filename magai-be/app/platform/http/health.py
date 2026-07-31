@@ -62,6 +62,15 @@ async def _check_redis(url: str) -> tuple[bool, str]:
 
 
 async def _gather_checks() -> dict[str, str]:
+    if settings.local_builds_enabled:
+        _, database_detail = await _check_database()
+        return {
+            "database": database_detail,
+            "redis_events": "in_memory",
+            "celery_broker": "in_process",
+            "celery_backend": "not_required",
+        }
+
     db_result, events_result, broker_result, backend_result = await asyncio.gather(
         _check_database(),
         _check_redis(settings.redis_url),
@@ -87,7 +96,15 @@ async def readiness(response: Response) -> dict[str, object]:
     checks = await _gather_checks()
     # Redis for events is required to serve; the Celery result backend being down
     # degrades builds but not reads, so it is reported without failing readiness.
-    critical = ("database", "redis_events", "celery_broker")
+    critical = (
+        ("database",)
+        if settings.local_builds_enabled
+        else (
+            "database",
+            "redis_events",
+            "celery_broker",
+        )
+    )
     ready = all(checks[name] == "connected" for name in critical)
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -97,7 +114,8 @@ async def readiness(response: Response) -> dict[str, object]:
 @router.get("/health")
 async def health() -> dict[str, object]:
     checks = await _gather_checks()
-    all_ok = all(value == "connected" for value in checks.values())
+    healthy_values = {"connected", "in_memory", "in_process", "not_required"}
+    all_ok = all(value in healthy_values for value in checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
         "environment": settings.environment,

@@ -59,6 +59,7 @@ from app.features.auth.service import (
 from app.features.users.models import User
 from app.platform.config.settings import settings
 from app.platform.db.session import get_async_session
+from app.platform.observability.metrics import product_activation_events_total
 from app.platform.security.passwords import PasswordPolicyError
 from app.platform.security.rate_limit import rate_limit
 from app.platform.security.revocation import is_revoked, revoke
@@ -142,6 +143,7 @@ async def signup(
         ) from None
 
     await send_verification_email(db, user)
+    product_activation_events_total.labels("account", "created").inc()
     return _issue_tokens(user)
 
 

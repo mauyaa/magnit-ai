@@ -234,7 +234,7 @@ function ConnectedCard({
           ] as const
         ).map(([label, value]) => (
           <div key={label}>
-            <dt className="text-[11px] text-muted-foreground">{label}</dt>
+            <dt className="text-xs text-muted-foreground">{label}</dt>
             <dd className="tabular mt-0.5 text-sm font-medium text-foreground">{value}</dd>
           </div>
         ))}

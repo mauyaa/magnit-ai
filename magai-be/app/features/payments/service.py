@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 import stripe
 from sqlalchemy import func, select
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.features.payments.models import Payment, Subscription
 from app.features.widgets.models import Widget
 from app.platform.config.settings import settings
+from app.platform.observability.metrics import product_activation_events_total
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +70,7 @@ async def create_checkout_session(
                     "price_data": {
                         "currency": settings.widget_launch_currency,
                         "product_data": {
-                            "name": "MagnetAI decision tool launch",
+                            "name": "Magnitai decision tool launch",
                             "description": (
                                 "One grounded, branded, working decision tool with deployment"
                             ),
@@ -209,6 +211,7 @@ async def handle_subscription_checkout_completed(db: AsyncSession, session_id: s
     )
     if subscription is None:
         return False
+    was_active = subscription.status == "active"
 
     configure_stripe()
     try:
@@ -240,6 +243,8 @@ async def handle_subscription_checkout_completed(db: AsyncSession, session_id: s
     subscription.current_period_end = _period_end(
         getattr(stripe_subscription, "current_period_end", None)
     )
+    if subscription.status == "active" and not was_active:
+        product_activation_events_total.labels("subscription_checkout", "completed").inc()
     return subscription.status == "active"
 
 
@@ -339,6 +344,7 @@ async def handle_checkout_completed(db: AsyncSession, session_id: str) -> bool:
     )
     payment.confirmed_at = datetime.now(UTC)
     await _mark_widget_paid(db, payment)
+    product_activation_events_total.labels("one_time_checkout", "completed").inc()
     logger.info("Confirmed payment %s for user %s", payment.id, payment.user_id)
     return True
 
@@ -349,11 +355,136 @@ async def handle_checkout_expired(db: AsyncSession, session_id: str) -> bool:
     if payment is None or payment.status != "pending":
         return payment is not None
     payment.status = "failed"
-    if payment.widget_id:
-        widget = await db.scalar(select(Widget).where(Widget.id == payment.widget_id))
-        if widget is not None and widget.entitlement_status == "checkout_pending":
-            widget.entitlement_status = "preview"
+    await _release_widget(db, payment)
     return True
+
+
+class CheckoutSessionNotFound(Exception):
+    """No checkout session with that id belongs to this workspace."""
+
+
+# paid: entitled. pending: Stripe is still deciding, or was unreachable and the
+# webhook remains the backstop. released: nothing was charged and the tool is
+# buildable again.
+CheckoutOutcome = Literal["paid", "pending", "released"]
+
+
+async def _release_widget(db: AsyncSession, payment: Payment) -> None:
+    """Hand a widget back to its owner after a checkout that did not complete."""
+    if not payment.widget_id:
+        return
+    widget = await db.scalar(select(Widget).where(Widget.id == payment.widget_id))
+    if widget is not None and widget.entitlement_status == "checkout_pending":
+        widget.entitlement_status = "preview"
+
+
+async def reconcile_checkout_session(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    session_id: str,
+) -> CheckoutOutcome:
+    """Settle a checkout from the customer's own return trip.
+
+    Creating a session marks the widget ``checkout_pending``, which disables the
+    build button. Until now only Stripe could clear that: a customer who pressed
+    "back" on the payment page returned to a tool they could no longer build,
+    and stayed stuck until the session expired hours later. The webhook is still
+    the authority — this asks Stripe the same question the webhook answers, at
+    the moment the customer is actually waiting for it.
+
+    Never trusts the browser: the outcome comes from Stripe, not from the query
+    string the customer arrived back with.
+    """
+    payment = await db.scalar(
+        select(Payment).where(
+            Payment.stripe_session_id == session_id,
+            Payment.user_id == user_id,
+        )
+    )
+    if payment is None:
+        raise CheckoutSessionNotFound()
+
+    if payment.status == "confirmed":
+        await _mark_widget_paid(db, payment)
+        return "paid"
+    if payment.status in {"failed", "refunded"}:
+        await _release_widget(db, payment)
+        return "released"
+
+    configure_stripe()
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except stripe.StripeError:
+        # Stripe being unreachable is not evidence the customer did not pay, so
+        # the entitlement stays where it is and the webhook remains the backstop.
+        logger.warning("Could not reconcile Stripe session %s", session_id)
+        return "pending"
+
+    if session.payment_status == "paid":
+        # One confirmation path, with its amount check and its idempotency.
+        try:
+            await handle_checkout_completed(db, session_id)
+        except PaymentProviderError:
+            return "pending"
+        return "paid" if payment.status == "confirmed" else "pending"
+
+    if str(session.status or "") == "open":
+        # The session is still live: they can finish it later from the same URL,
+        # and the webhook will confirm it if they do. Meanwhile the tool is
+        # theirs again, because nothing has been charged.
+        await _release_widget(db, payment)
+        return "released"
+
+    # Expired, or completed without payment. Nothing more will happen to it.
+    payment.status = "failed"
+    await _release_widget(db, payment)
+    return "released"
+
+
+async def reconcile_subscription_session(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    session_id: str,
+) -> CheckoutOutcome:
+    """The subscription equivalent: settle a plan checkout on return.
+
+    An abandoned plan checkout otherwise leaves the workspace reading
+    ``checkout_pending`` indefinitely, which is neither free nor subscribed.
+    """
+    subscription = await db.scalar(
+        select(Subscription).where(
+            Subscription.stripe_session_id == session_id,
+            Subscription.user_id == user_id,
+        )
+    )
+    if subscription is None:
+        raise CheckoutSessionNotFound()
+
+    if subscription.status == "active":
+        return "paid"
+
+    configure_stripe()
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except stripe.StripeError:
+        logger.warning("Could not reconcile Stripe subscription session %s", session_id)
+        return "pending"
+
+    if session.payment_status == "paid":
+        try:
+            await handle_subscription_checkout_completed(db, session_id)
+        except PaymentProviderError:
+            return "pending"
+        return "paid" if subscription.status == "active" else "pending"
+
+    if subscription.status == "checkout_pending":
+        # They gave up before paying. `canceled` is the row's only way of saying
+        # "no plan" — the check constraint has no other value for it, and the
+        # summary endpoint reports plan `free` for anything that is not active.
+        subscription.status = "canceled"
+    return "released"
 
 
 async def handle_payment_refunded(

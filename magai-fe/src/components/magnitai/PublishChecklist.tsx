@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, CircleDashed, ExternalLink, Loader2, PartyPopper } from "lucide-react";
 
 import { useReadiness, useWidgetFunnel, type ReadinessCheck, type WidgetData } from "@/lib/api";
+import { liveAddress } from "@/lib/widget-url";
 
 /**
  * Where a failing check sends someone to fix it.
@@ -118,7 +119,8 @@ export function PublishChecklist({ widget }: { widget: WidgetData }) {
 export function LiveConfirmation({ widget }: { widget: WidgetData }) {
   const { data: funnel } = useWidgetFunnel(widget.id);
 
-  if (!widget.deployment_url || widget.status !== "active") return null;
+  const address = liveAddress(widget);
+  if (!address || widget.status !== "active") return null;
 
   const stats: Array<[string, string]> = [
     ["Visitors", (funnel?.views ?? widget.impressions_count).toLocaleString()],
@@ -140,10 +142,10 @@ export function LiveConfirmation({ widget }: { widget: WidgetData }) {
 
         <div className="mx-auto mt-4 flex max-w-lg flex-col items-center gap-2 sm:flex-row">
           <span className="w-full min-w-0 truncate rounded-lg border border-border bg-n-50 px-3 py-2 text-left font-mono text-xs text-muted-foreground">
-            {widget.deployment_url.replace(/^https?:\/\//, "")}
+            {address.replace(/^https?:\/\//, "")}
           </span>
           <a
-            href={widget.deployment_url}
+            href={address}
             target="_blank"
             rel="noreferrer"
             className="btn btn-primary h-9 w-full shrink-0 text-sm sm:w-auto"

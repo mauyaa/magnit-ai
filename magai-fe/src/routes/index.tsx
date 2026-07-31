@@ -4,14 +4,14 @@ import { AppShell } from "@/components/magnitai/AppShell";
 import { LandingPage } from "@/components/magnitai/LandingPage";
 
 const DESCRIPTION =
-  "Give Magnitai your website address. It builds a calculator, quiz, or audit in your own brand, hosts it, and keeps it in sync as your site changes.";
+  "Turn more website visitors into qualified leads. Magnitai builds a branded calculator, quiz, or audit from your existing website and gives you one embed to publish it.";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Magnitai · Interactive tools in your brand" },
+      { title: "Magnitai · Turn website traffic into qualified leads" },
       { name: "description", content: DESCRIPTION },
-      { property: "og:title", content: "Magnitai · Interactive tools in your brand" },
+      { property: "og:title", content: "Magnitai · Turn website traffic into qualified leads" },
       { property: "og:description", content: DESCRIPTION },
     ],
   }),

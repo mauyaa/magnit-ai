@@ -20,7 +20,7 @@ describe("gallery · playable examples", () => {
   it("offers a finished tool for every showcase business", async () => {
     renderWithRouter(WidgetGallery);
 
-    const tabs = await screen.findByRole("tablist", { name: /example tools/i });
+    const tabs = await screen.findByRole("tablist", { name: /lead magnet examples/i });
     for (const example of SHOWCASE) {
       expect(within(tabs).getByRole("tab", { name: example.business })).toBeInTheDocument();
     }
@@ -35,6 +35,20 @@ describe("gallery · playable examples", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("finishes with a useful result and a concrete recommendation", async () => {
+    renderWithRouter(WidgetGallery);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await userEvent.click(screen.getByRole("button", { name: "Phone only" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not yet" }));
+
+    expect(await screen.findByText("Recommended next step")).toBeInTheDocument();
+    expect(
+      screen.getByText(SHOWCASE[0].architect.decision!.results[0].recommendation),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
   it("switches to another business on request", async () => {
     renderWithRouter(WidgetGallery);
 
@@ -44,25 +58,25 @@ describe("gallery · playable examples", () => {
     expect(await screen.findByText(solar.architect.decision!.buyer_question)).toBeInTheDocument();
   });
 
-  it("states what the visitor gets before any email is asked for", async () => {
+  it("states what the business learns from the interaction", async () => {
     renderWithRouter(WidgetGallery);
 
     expect(
-      await screen.findByText(SHOWCASE[0].architect.decision!.value_before_gate),
+      await screen.findByText(SHOWCASE[0].architect.decision!.qualification_goal),
     ).toBeInTheDocument();
   });
 
   it("sends someone who is convinced straight to the builder", async () => {
     renderWithRouter(WidgetGallery);
 
-    const cta = await screen.findByRole("link", { name: /build this from my website/i });
+    const cta = await screen.findByRole("link", { name: /build mine/i });
     expect(cta).toHaveAttribute("href", "/build");
   });
 
   it("has no accessibility violations", async () => {
     const { container } = renderWithRouter(WidgetGallery);
 
-    await screen.findByRole("tablist", { name: /example tools/i });
+    await screen.findByRole("tablist", { name: /lead magnet examples/i });
     await expectNoA11yViolations(container);
   });
 });

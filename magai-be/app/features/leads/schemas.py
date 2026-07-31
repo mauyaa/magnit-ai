@@ -53,6 +53,46 @@ class TimelineEntryResponse(BaseModel):
     tone: str
 
 
+class WorkspaceLeadResponse(LeadResponse):
+    """A lead as the workspace-wide list shows it: with the tool that caught it."""
+
+    widget_title: str
+
+
+class LeadPageResponse(BaseModel):
+    """One page, and enough to know what is not on it.
+
+    ``total`` is the honest count for the current filters. Without it the screen
+    can only say "here are some leads", which is exactly the ambiguity that let
+    a silently-dropped request look like an empty inbox.
+    """
+
+    items: list[WorkspaceLeadResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class LeadDeliveryResponse(BaseModel):
+    """Where this lead has reached, and where it has not.
+
+    Shown because "we captured it" and "your CRM has it" are different claims,
+    and a business relying on the second one deserves to see which is true.
+    """
+
+    id: str
+    channel: Literal["owner_email", "webhook", "integration"]
+    # The connection's provider, for the integration channel. None otherwise.
+    provider: str | None = None
+    status: Literal["pending", "delivered", "failed", "skipped"]
+    attempts: int
+    last_error: str | None = None
+    next_attempt_at: str | None = None
+    delivered_at: str | None = None
+    # Whether the owner may ask for another attempt right now.
+    retryable: bool = False
+
+
 class LeadDetailResponse(BaseModel):
     """Everything the lead page shows, in one request.
 
@@ -67,6 +107,7 @@ class LeadDetailResponse(BaseModel):
     widget_id: str
     notes: list[LeadNoteResponse]
     timeline: list[TimelineEntryResponse]
+    deliveries: list[LeadDeliveryResponse]
 
 
 class UpdateLeadRequest(BaseModel):

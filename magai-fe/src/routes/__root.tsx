@@ -74,21 +74,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Magnitai · Self-Healing AI Widgets for Small Business" },
+      { title: "Magnitai · Interactive lead magnets for existing websites" },
       {
         name: "description",
         content:
-          "Magnitai builds, deploys, and self-heals on-brand interactive widgets — calculators, quizzes, and AI tools — so your site keeps converting even as it evolves.",
+          "Magnitai turns an existing website page into a branded calculator, quiz, or audit that gives visitors a useful result and gives your business qualified leads.",
       },
       { name: "author", content: "Magnitai" },
       {
         property: "og:title",
-        content: "Magnitai · Self-Healing AI Widgets for Small Business",
+        content: "Magnitai · Interactive lead magnets for existing websites",
       },
       {
         property: "og:description",
         content:
-          "Magnitai builds, deploys, and self-heals on-brand interactive widgets — calculators, quizzes, and AI tools — so your site keeps converting even as it evolves.",
+          "Magnitai turns an existing website page into a branded calculator, quiz, or audit that gives visitors a useful result and gives your business qualified leads.",
       },
       { property: "og:type", content: "website" },
       { property: "og:image", content: "/magnit-logo-cropped.png" },
@@ -96,10 +96,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:image:height", content: "690" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@magnitai" },
-      { name: "twitter:title", content: "Magnitai · Self-Healing AI Widgets" },
+      { name: "twitter:title", content: "Magnitai · Turn website traffic into qualified leads" },
       {
         name: "twitter:description",
-        content: "AI widgets that build themselves, stay on-brand, and self-heal.",
+        content: "Branded calculators, quizzes and audits built from the website you already have.",
       },
       { name: "twitter:image", content: "/magnit-logo-cropped.png" },
       { name: "theme-color", content: "#fffaeb" },

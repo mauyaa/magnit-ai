@@ -2,10 +2,8 @@ import { AlertCircle, ArrowRight, Check, Loader2, LockKeyhole } from "lucide-rea
 import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth";
+import { PASSWORD_HINT, passwordProblem } from "@/lib/password-policy";
 import { GoogleAuthButton } from "./GoogleAuthButton";
-
-/** Mirrors the backend's MAGAI_PASSWORD_MIN_LENGTH default. */
-const MIN_PASSWORD_LENGTH = 12;
 
 type Mode = "login" | "signup";
 
@@ -51,11 +49,10 @@ export function AuthForm({
     if (!password) {
       errors.password = "Enter your password.";
     } else if (mode === "signup") {
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        errors.password = `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
-      } else if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-        errors.password = "Include both letters and numbers.";
-      }
+      // Only sign-up enforces the rule. Applying it at sign-in would lock out
+      // anyone whose password predates a future change to the policy.
+      const problem = passwordProblem(password);
+      if (problem) errors.password = problem;
     }
 
     setFieldErrors(errors);
@@ -161,9 +158,22 @@ export function AuthForm({
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="auth-password" className="text-sm font-medium text-foreground">
-                Password
-              </label>
+              <div className="flex items-baseline justify-between gap-3">
+                <label htmlFor="auth-password" className="text-sm font-medium text-foreground">
+                  Password
+                </label>
+                {!isSignup && (
+                  /* Plain anchor, like Terms and Privacy below: this form is
+                     rendered outside the router in tests and in the auth gate
+                     dialog, so it must not depend on router context. */
+                  <a
+                    href="/forgot-password"
+                    className="text-xs text-muted-foreground underline decoration-border-strong underline-offset-4 hover:text-foreground"
+                  >
+                    Forgot password?
+                  </a>
+                )}
+              </div>
               <input
                 id="auth-password"
                 name="password"
@@ -198,7 +208,7 @@ export function AuthForm({
               ) : (
                 isSignup && (
                   <p id="auth-password-hint" className="text-xs leading-5 text-muted-foreground">
-                    At least {MIN_PASSWORD_LENGTH} characters, including a number.
+                    {PASSWORD_HINT}
                   </p>
                 )
               )}

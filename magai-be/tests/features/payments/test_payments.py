@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
+import stripe
 from sqlalchemy import select
 
 from app.features.payments.models import Payment, Subscription
@@ -331,3 +332,92 @@ class TestWorkspaceSubscriptions:
         await db.commit()
 
         assert await account_can_build(db, candidate) is False
+
+
+class TestReconcileCheckout:
+    """The endpoint the browser calls on its way back from Stripe."""
+
+    async def test_requires_authentication(self, client):
+        response = await client.post(
+            "/api/payments/checkout/cs_anything/reconcile", json={"kind": "one_time"}
+        )
+        assert response.status_code == 401
+
+    async def test_an_unknown_session_is_not_found(self, as_user, user):
+        response = await as_user(user).post(
+            "/api/payments/checkout/cs_nope/reconcile", json={"kind": "one_time"}
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == "checkout_session_not_found"
+
+    async def test_another_workspace_cannot_settle_your_checkout(
+        self, as_user, db, user, other_user
+    ):
+        widget = await _widget(db, user)
+        db.add(
+            Payment(
+                user_id=user.id,
+                widget_id=widget.id,
+                stripe_session_id="cs_private",
+                amount=100,
+                currency="usd",
+                status="pending",
+            )
+        )
+        await db.commit()
+
+        response = await as_user(other_user).post(
+            "/api/payments/checkout/cs_private/reconcile", json={"kind": "one_time"}
+        )
+        assert response.status_code == 404
+
+    async def test_a_cancelled_checkout_hands_the_tool_back(self, as_user, db, user, monkeypatch):
+        """The whole point: the build button works again without waiting on Stripe."""
+        widget = await _widget(db, user)
+        widget.entitlement_status = "checkout_pending"
+        db.add(
+            Payment(
+                user_id=user.id,
+                widget_id=widget.id,
+                stripe_session_id="cs_walked_away",
+                amount=100,
+                currency="usd",
+                status="pending",
+            )
+        )
+        await db.commit()
+
+        class _Session:
+            payment_status = "unpaid"
+            status = "expired"
+
+            def get(self, key, default=None):
+                return getattr(self, key, default)
+
+        monkeypatch.setattr(stripe.checkout.Session, "retrieve", lambda *a, **k: _Session())
+
+        response = await as_user(user).post(
+            "/api/payments/checkout/cs_walked_away/reconcile", json={"kind": "one_time"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["outcome"] == "released"
+        await db.refresh(widget)
+        assert widget.entitlement_status == "preview"
+
+    async def test_the_kind_selects_the_subscription_path(self, as_user, db, user):
+        subscription = Subscription(user_id=user.id, plan="studio", status="checkout_pending")
+        subscription.stripe_session_id = "cs_plan_route"
+        db.add(subscription)
+        await db.commit()
+
+        with patch(
+            "app.features.payments.routes.reconcile_subscription_session",
+            new=AsyncMock(return_value="released"),
+        ) as subscription_path:
+            response = await as_user(user).post(
+                "/api/payments/checkout/cs_plan_route/reconcile", json={"kind": "subscription"}
+            )
+
+        assert response.status_code == 200
+        assert subscription_path.await_count == 1

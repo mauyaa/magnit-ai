@@ -6,7 +6,7 @@ pulling in the full model graph.
 
 from app.features.billing.models import UsageRecord
 from app.features.integrations.models import Integration, IntegrationDelivery
-from app.features.leads.models import Lead, LeadNote
+from app.features.leads.models import Lead, LeadDelivery, LeadNote
 from app.features.payments.models import Payment, Subscription
 from app.features.users.models import (
     ApiKey,
@@ -32,6 +32,7 @@ __all__ = [
     "Integration",
     "IntegrationDelivery",
     "Lead",
+    "LeadDelivery",
     "LeadNote",
     "Payment",
     "Subscription",

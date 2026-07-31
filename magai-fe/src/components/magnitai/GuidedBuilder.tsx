@@ -106,7 +106,7 @@ function Decision({
           }`}
         >
           <Sparkles className="size-3" aria-hidden="true" />
-          {delegated ? "AI decides" : "Let AI decide"}
+          {delegated ? "Magnitai decides" : "Let Magnitai decide"}
         </button>
       </div>
 
@@ -195,14 +195,14 @@ export function GuidedBuilder({
       <div className="mt-8 max-w-3xl">
         <div className="inline-flex items-center gap-2 rounded-full border border-brand-solid/20 bg-brand-wash px-3 py-1.5 text-xs font-medium text-brand-solid">
           <Sparkles className="size-3.5" aria-hidden="true" />
-          Collaborative AI builder
+          Guided lead magnet builder
         </div>
         <h1 className="mt-6 font-heading text-[clamp(2.65rem,6vw,4.5rem)] font-medium leading-[0.96] tracking-[-0.055em] text-foreground">
-          Set the direction. Let AI fill the gaps.
+          Shape what matters. Let Magnitai complete the rest.
         </h1>
         <p className="mt-6 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
-          Describe exactly what you want, tailor any detail below, and leave every other decision to
-          Magnitai.
+          Describe the result your visitor should get. Set any detail that matters and leave the
+          rest to Magnitai.
         </p>
       </div>
 
@@ -220,8 +220,8 @@ export function GuidedBuilder({
               What should Magnitai build?
             </label>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Write one sentence or a full idea. Leave it blank and AI will propose the concept from
-              your website.
+              Write one sentence or a full idea. Leave it blank and Magnitai will recommend the lead
+              magnet from your website.
             </p>
             <textarea
               id="gb-intent"
@@ -240,7 +240,7 @@ export function GuidedBuilder({
                 Tailor any detail
               </h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Every detail starts with AI. Take control only where it matters to you.
+                Magnitai can recommend every detail. Take control only where it matters to you.
               </p>
             </div>
 
@@ -354,7 +354,7 @@ export function GuidedBuilder({
               <Decision
                 id="gb-tone"
                 label="Tone"
-                hint="Choose a voice, or let AI match the website."
+                hint="Choose a voice, or let Magnitai match the website."
                 delegated={delegated.has("tone")}
                 onToggle={() => toggle("tone")}
               >
@@ -433,7 +433,7 @@ export function GuidedBuilder({
               Add anything the controls did not cover
             </label>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Include must-haves, calculations, inputs, language, constraints or anything the AI
+              Include must-haves, calculations, inputs, language, constraints or anything Magnitai
               should avoid.
             </p>
             <textarea
@@ -448,14 +448,14 @@ export function GuidedBuilder({
           </section>
         </div>
 
-        <aside aria-label="Collaboration summary" className="lg:sticky lg:top-28">
+        <aside aria-label="Lead magnet brief" className="lg:sticky lg:top-28">
           <div className="rounded-[1.7rem] bg-inverse p-5 text-inverse-foreground shadow-float">
             <div className="flex items-center gap-2 text-xs text-inverse-muted">
               <Sparkles className="size-4 text-brand-on-inverse" aria-hidden="true" />
-              Your collaboration
+              Your brief
             </div>
             <h2 className="mt-5 font-heading text-2xl font-medium leading-[1.05] tracking-[-0.04em]">
-              You direct what matters. AI handles the rest.
+              Your choices stay fixed. Magnitai completes the rest.
             </h2>
 
             <div className="mt-6 grid grid-cols-2 border-y border-inverse-border py-4">
@@ -469,7 +469,9 @@ export function GuidedBuilder({
                 <span className="block font-mono text-2xl text-inverse-foreground">
                   {delegated.size}
                 </span>
-                <span className="mt-1 block text-[11px] text-inverse-muted">Handled by AI</span>
+                <span className="mt-1 block text-[11px] text-inverse-muted">
+                  Recommended by Magnitai
+                </span>
               </div>
             </div>
 
@@ -511,7 +513,7 @@ export function GuidedBuilder({
               className="btn mt-6 h-12 w-full bg-brand px-5 text-sm font-semibold text-foreground hover:brightness-95 disabled:cursor-wait disabled:opacity-60"
             >
               {pending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
-              Build my directions
+              Create my lead magnets
               <ArrowRight className="size-4" aria-hidden="true" />
             </button>
 

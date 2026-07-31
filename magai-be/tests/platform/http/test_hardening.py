@@ -1,8 +1,13 @@
 """HTTP hardening: security headers, CORS, body limits, error shape."""
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+from starlette.applications import Starlette
+from starlette.requests import ClientDisconnect
+from starlette.routing import Route
 
 from app.platform.config.settings import Settings
+from app.platform.http.middleware import RequestContextMiddleware
 
 
 class TestSecurityHeaders:
@@ -55,6 +60,24 @@ class TestBodyLimit:
             "/api/auth/login", json={"email": "a@example.com", "password": oversized}
         )
         assert response.status_code == 413
+
+
+class TestClientDisconnect:
+    async def test_expected_disconnect_is_not_reported_as_a_server_error(self):
+        async def disconnect(_request):
+            raise ClientDisconnect
+
+        app = Starlette(routes=[Route("/", disconnect)])
+        app.add_middleware(RequestContextMiddleware)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=True),
+            base_url="http://test",
+        ) as client:
+            response = await client.get("/")
+
+        assert response.status_code == 499
+        assert response.headers.get("X-Request-ID")
 
 
 class TestErrorShape:

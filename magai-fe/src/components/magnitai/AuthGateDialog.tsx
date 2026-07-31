@@ -121,20 +121,20 @@ export function AuthGateDialog({
                 ? "Save your collaboration"
                 : intent === "autopilot"
                   ? "Let Magnitai build it"
-                  : "Save this direction"}
+                  : "Save this lead magnet"}
           </DialogTitle>
           <DialogDescription className="text-sm leading-6">
             {intent === "autopilot" ? (
               <>
                 {isSignup ? "Create an account" : "Sign in"} and Magnitai will analyze{" "}
-                {domain || "your website"}, choose the strongest direction, and add the result to
+                {domain || "your website"}, choose the strongest lead magnet, and add the result to
                 your dashboard.
               </>
             ) : intent === "guided" ? (
               <>
-                Your directions are ready. {isSignup ? "Create an account" : "Sign in"} and Magnitai
-                will build them{domain ? <> for {domain}</> : null}. Your brief stays exactly as you
-                set it.
+                Your lead magnets are ready. {isSignup ? "Create an account" : "Sign in"} and
+                Magnitai will build them{domain ? <> for {domain}</> : null}. Your brief stays
+                exactly as you set it.
               </>
             ) : conceptTitle ? (
               <>
@@ -237,7 +237,7 @@ export function AuthGateDialog({
               ? "Nothing is published until you review and approve it."
               : intent === "guided"
                 ? "Your brief stays intact. Nothing is published until you say so."
-                : "Your direction is already saved. Nothing is published until you say so."}
+                : "Your lead magnet is already saved. Nothing is published until you say so."}
           </p>
         </form>
       </DialogContent>

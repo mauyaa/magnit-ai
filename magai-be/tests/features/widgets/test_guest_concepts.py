@@ -2,7 +2,10 @@
 
 from unittest.mock import AsyncMock
 
+from sqlalchemy import func, select
+
 from app.features.widgets.models import Widget
+from app.features.widgets.service import create_guest_concept_token
 from app.platform.pipeline.schemas import (
     ArchitectOutput,
     Blueprint,
@@ -57,6 +60,16 @@ def _architect(kind: WidgetType, number: int) -> ArchitectOutput:
             example_calculation="10 * 100 = 1000",
         ),
         copywriting={"headline": f"Useful direction {number}", "cta": "See my result"},
+    )
+
+
+def _token() -> str:
+    """A signed first look, exactly as the public endpoint would return one."""
+    return create_guest_concept_token(
+        "https://example.com/",
+        [_blueprint(WidgetType.ROI_CALCULATOR, 1), _blueprint(WidgetType.READINESS_QUIZ, 2)],
+        [_architect(WidgetType.ROI_CALCULATOR, 1), _architect(WidgetType.READINESS_QUIZ, 2)],
+        _evidence(),
     )
 
 
@@ -188,3 +201,59 @@ async def test_architect_timeout_uses_a_grounded_preview(client, monkeypatch):
     concepts = response.json()["concepts"]
     assert len(concepts) == 2
     assert concepts[0]["architect"]["decision"]["lead_gate"] == "after_value"
+
+
+class TestClaimIsIdempotent:
+    """The same claim, sent twice, is one tool.
+
+    The browser sends this at the moment an account is created — the one point
+    in the journey where a refresh or a second click is most likely, and where
+    the customer is least equipped to understand three identical drafts.
+    """
+
+    async def test_replaying_the_claim_returns_the_same_tool(self, as_user, db, user):
+        token = _token()
+        first = await as_user(user).post(
+            "/api/widgets/claim-guest",
+            json={"session_token": token, "selected_index": 0},
+        )
+        second = await as_user(user).post(
+            "/api/widgets/claim-guest",
+            json={"session_token": token, "selected_index": 0},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["widget_id"] == second.json()["widget_id"]
+
+        count = await db.scalar(select(func.count(Widget.id)).where(Widget.user_id == user.id))
+        assert count == 1
+
+    async def test_choosing_the_other_direction_is_a_different_claim(self, as_user, db, user):
+        """Not a duplicate: they genuinely asked for the second concept too."""
+        token = _token()
+        first = await as_user(user).post(
+            "/api/widgets/claim-guest",
+            json={"session_token": token, "selected_index": 0},
+        )
+        second = await as_user(user).post(
+            "/api/widgets/claim-guest",
+            json={"session_token": token, "selected_index": 1},
+        )
+
+        assert first.json()["widget_id"] != second.json()["widget_id"]
+
+    async def test_another_workspace_claiming_the_same_session_gets_its_own_tool(
+        self, as_user, db, user, other_user
+    ):
+        token = _token()
+        mine = await as_user(user).post(
+            "/api/widgets/claim-guest",
+            json={"session_token": token, "selected_index": 0},
+        )
+        theirs = await as_user(other_user).post(
+            "/api/widgets/claim-guest",
+            json={"session_token": token, "selected_index": 0},
+        )
+
+        assert mine.json()["widget_id"] != theirs.json()["widget_id"]

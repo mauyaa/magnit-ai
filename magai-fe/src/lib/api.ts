@@ -1,5 +1,5 @@
 /**
- * React Query hooks for the MagnetAI API.
+ * React Query hooks for the Magnitai API.
  *
  * Every request goes through `api` in ./api-client, which attaches the bearer
  * token, refreshes it once on expiry, and normalizes errors.
@@ -7,7 +7,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, API_BASE } from "./api-client";
+import { api, ApiError, API_BASE } from "./api-client";
 import { getAccessToken } from "./auth-storage";
 import type { AuthUser } from "./auth";
 
@@ -67,7 +67,14 @@ export interface WidgetData {
   widget_type: string;
   status: string;
   target_url: string;
+  /** The URL of one particular build. Changes on every publish. */
   deployment_url: string | null;
+  /**
+   * The address inside the snippet on the customer's website. Written once and
+   * never changed, so a rebuild, repair or rollback moves what it serves rather
+   * than where it points. Null until the tool has been published.
+   */
+  embed_url: string | null;
   embed_code: string | null;
   leads_count: number;
   impressions_count: number;
@@ -238,7 +245,23 @@ export interface CuratedConcept {
 export interface GuestConceptsResponse {
   target_url: string;
   session_token: string;
-  concepts: [CuratedConcept, CuratedConcept];
+  concepts: CuratedConcept[];
+  brief: CreationBrief;
+}
+
+export interface ResumeBuildResponse {
+  target_url: string;
+  /**
+   * Null when the customer analysed a site but never chose a direction.
+   *
+   * That is an ordinary place to stop, not a broken draft — it is the step
+   * straight after the read. Treating it as broken is what sent someone who
+   * clicked "Finish this tool" to an empty form with their site analysis
+   * silently discarded.
+   */
+  concept: CuratedConcept | null;
+  /** The directions produced for this site, chosen or not. */
+  blueprints: Blueprint[];
   brief: CreationBrief;
 }
 
@@ -486,12 +509,33 @@ export interface TimelineEntry {
   tone: "ok" | "pending" | "failed";
 }
 
+/**
+ * Where one lead has reached, per destination.
+ *
+ * "We captured it" and "your CRM has it" are different claims. A business
+ * relying on the second one deserves to see which is true, and to be able to do
+ * something when it is not.
+ */
+export interface LeadDelivery {
+  id: string;
+  channel: "owner_email" | "webhook" | "integration";
+  provider: string | null;
+  status: "pending" | "delivered" | "failed" | "skipped";
+  attempts: number;
+  last_error: string | null;
+  next_attempt_at: string | null;
+  delivered_at: string | null;
+  /** True once automatic attempts are exhausted and a person has to ask. */
+  retryable: boolean;
+}
+
 export interface LeadDetail {
   lead: LeadData;
   widget_title: string;
   widget_id: string;
   notes: LeadNote[];
   timeline: TimelineEntry[];
+  deliveries: LeadDelivery[];
 }
 
 // --- workspace brand --------------------------------------------------------
@@ -601,17 +645,95 @@ export function useLeads(widgetId: string) {
   });
 }
 
-export function useAllLeads(widgetIds: string[]) {
-  return useQuery<LeadData[]>({
-    queryKey: ["all-leads", widgetIds],
-    queryFn: async () => {
-      const results = await Promise.allSettled(
-        widgetIds.map((id) => api.get<LeadData[]>(`/api/widgets/${id}/leads`)),
-      );
-      return results.filter((r) => r.status === "fulfilled").flatMap((r) => r.value);
-    },
-    enabled: widgetIds.length > 0,
+export interface WorkspaceLead extends LeadData {
+  /** The tool that captured it, joined server-side so the table needs no lookup. */
+  widget_title: string;
+}
+
+export interface LeadPage {
+  items: WorkspaceLead[];
+  /** The honest count for the current filters, not the size of this page. */
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface LeadQuery {
+  widgetId?: string;
+  status?: LeadStatus;
+  query?: string;
+  sort?: "created_at" | "score" | "email";
+  direction?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+function leadSearchParams(input: LeadQuery): string {
+  const params = new URLSearchParams();
+  if (input.widgetId && input.widgetId !== "all") params.set("widget_id", input.widgetId);
+  if (input.status) params.set("status", input.status);
+  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.sort) params.set("sort", input.sort);
+  if (input.direction) params.set("direction", input.direction);
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  if (input.offset !== undefined) params.set("offset", String(input.offset));
+  return params.toString();
+}
+
+/**
+ * One page of the workspace's leads.
+ *
+ * Replaces a fan-out that fired one unpaginated request per tool and discarded
+ * the ones that failed — fine with three leads, and at the volumes the plans
+ * sell both slow and quietly wrong, because a dropped request looked exactly
+ * like an empty inbox. Filtering, sorting and counting are the server's job;
+ * it is the side with the index.
+ */
+export function useWorkspaceLeads(input: LeadQuery) {
+  const search = leadSearchParams(input);
+  return useQuery<LeadPage>({
+    queryKey: ["all-leads", search],
+    queryFn: () => api.get(`/api/leads?${search}`),
+    // Keeps the previous page on screen while the next one loads, so paging
+    // does not blink through an empty table.
+    placeholderData: (previous) => previous,
   });
+}
+
+/**
+ * Download the current filters as CSV, from the server, as the signed-in user.
+ *
+ * Not an `<a href>`. The API authenticates with a bearer token, and a plain
+ * link sends no headers — the browser would cheerfully "download" a 401. So the
+ * request is made properly and the response is saved from memory.
+ */
+export async function downloadLeadsCsv(input: LeadQuery): Promise<void> {
+  const params = leadSearchParams({
+    widgetId: input.widgetId,
+    status: input.status,
+    query: input.query,
+  });
+
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE}/api/leads/export.csv?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new ApiError(
+      response.status === 402
+        ? "Exporting leads is available from Studio."
+        : "We couldn't build that export. Please try again.",
+      response.status,
+    );
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `magnitai-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function useHealEvents(widgetId: string) {
@@ -638,10 +760,12 @@ export function usePayments() {
   });
 }
 
-export function useSubscription() {
+export function useSubscription(enabled = true) {
   return useQuery<SubscriptionData>({
     queryKey: ["subscription"],
     queryFn: () => api.get("/api/payments/subscription"),
+    enabled,
+    refetchInterval: (query) => (query.state.data?.status === "checkout_pending" ? 3_000 : false),
   });
 }
 
@@ -754,6 +878,15 @@ export function useToolTypes(widgetId: string | null) {
   });
 }
 
+export function useResumeBuild(widgetId: string | null) {
+  return useQuery({
+    queryKey: ["build-resume", widgetId],
+    queryFn: () => api.get<ResumeBuildResponse>(`/api/widgets/${widgetId}/build-resume`),
+    enabled: Boolean(widgetId),
+    staleTime: Infinity,
+  });
+}
+
 /**
  * `widgetType` names a tool outright; `blueprintIndex` picks one of the three
  * the analyzer proposed. Sending a type wins, so a stale index can't undo an
@@ -847,6 +980,26 @@ export function useCreateSubscriptionCheckout() {
         },
       ),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subscription"] });
+      queryClient.invalidateQueries({ queryKey: ["widgets"] });
+    },
+  });
+}
+
+/**
+ * Ask the API what actually happened to a checkout the browser just returned
+ * from. The query string says where Stripe sent us; only this says whether
+ * anything was charged, and it is what unsticks a cancelled purchase.
+ */
+export function useReconcileCheckout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, kind }: { sessionId: string; kind: "one_time" | "subscription" }) =>
+      api.post<{ outcome: "paid" | "pending" | "released" }>(
+        `/api/payments/checkout/${sessionId}/reconcile`,
+        { kind },
+      ),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["subscription"] });
       queryClient.invalidateQueries({ queryKey: ["widgets"] });
     },
@@ -961,7 +1114,7 @@ export function buildEventsUrl(widgetId: string): string | null {
 
 /** The public plan catalogue. Cached hard: it changes on a deploy, not per user. */
 export function usePlans() {
-  return useQuery<{ plans: PlanData[]; currency: string }>({
+  return useQuery<{ plans: PlanData[]; currency: string; single_tool_price: number }>({
     queryKey: ["plans"],
     queryFn: () => api.get("/api/billing/plans", { anonymous: true }),
     staleTime: 10 * 60_000,
@@ -1154,6 +1307,24 @@ export function useUpdateLead() {
       queryClient.invalidateQueries({ queryKey: ["lead", variables.leadId] });
       queryClient.invalidateQueries({ queryKey: ["all-leads"] });
       queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
+/**
+ * Ask for another attempt at a delivery that has stopped trying.
+ *
+ * Automatic retries are bounded so a permanently broken endpoint does not run
+ * forever, which leaves one case the product owes an answer for: the customer
+ * has fixed their end and wants the lead they already have.
+ */
+export function useRetryLeadDelivery() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { leadId: string; deliveryId: string }) =>
+      api.post<LeadDelivery>(`/api/leads/${input.leadId}/deliveries/${input.deliveryId}/retry`),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["lead", variables.leadId] });
     },
   });
 }

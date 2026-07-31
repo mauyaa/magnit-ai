@@ -41,7 +41,7 @@ from app.features.widgets.schemas import (
     PortfolioAnalyticsResponse,
     TrackInteractionRequest,
 )
-from app.platform.clients.deployment import deploy_directory
+from app.platform.clients.deployment import deploy_directory, promote_deployment
 from app.platform.config.settings import settings
 from app.platform.db.session import rows_affected
 from app.platform.observability.metrics import generation_provider_total
@@ -55,6 +55,7 @@ from app.platform.pipeline.schemas import (
     CreationBrief,
     DecisionSpec,
     SiteEvidence,
+    WidgetType,
 )
 from app.platform.security.url_guard import validate_target_url
 
@@ -135,6 +136,51 @@ def widget_logic_from_architect(architect: ArchitectOutput) -> dict:
     }
 
 
+def architect_from_widget(widget: Widget) -> ArchitectOutput:
+    """Rebuild the approved design from the columns that store it.
+
+    The widget's own rows are the canonical record of what the customer signed
+    off — brand, visual language, calculation, decision, claims and copy. This
+    is the one place that reassembles them, so resuming a build and retrying a
+    failed one cannot disagree about what was approved.
+
+    Raises ``ValidationError`` or ``ValueError`` if the stored shape cannot make
+    a valid design; callers decide what to tell the customer.
+    """
+    logic = widget.widget_logic or {}
+    return ArchitectOutput.model_validate(
+        {
+            "widget_type": WidgetType(widget.widget_type),
+            "brand": widget.brand_tokens,
+            "visual_language": widget.visual_language,
+            "logic": logic.get("calculation"),
+            "copywriting": widget.copywriting,
+            "decision": logic.get("decision"),
+            "claims": logic.get("claims") or [],
+        }
+    )
+
+
+async def persist_architect(db: AsyncSession, widget: Widget, architect: ArchitectOutput) -> None:
+    """Save the design a build is about to run with, before it runs.
+
+    Fine-tuning used to live only in one browser tab's session storage, which was
+    cleared the moment the build was enqueued and written to the database only
+    if the whole build then succeeded. A build that failed — a provider outage,
+    a bad generation, a deploy that timed out — therefore threw away every edit
+    the customer had made, and the resume screen quietly rebuilt the version
+    from before they touched it.
+
+    Writing it here makes the database the record of what was approved, so a
+    failure costs a retry rather than the work.
+    """
+    widget.brand_tokens = architect.brand.model_dump(mode="json")
+    widget.visual_language = architect.visual_language.model_dump(mode="json")
+    widget.widget_logic = widget_logic_from_architect(architect)
+    widget.copywriting = architect.copywriting
+    await db.flush()
+
+
 def decision_spec_of(widget: Widget) -> DecisionSpec | None:
     """The widget's question flow, or ``None`` if it has no valid one.
 
@@ -169,13 +215,16 @@ async def put_decision_spec(db: AsyncSession, widget: Widget, decision: Decision
     return widget
 
 
-def build_embed_code(deployment_url: str) -> str:
+def build_embed_code(embed_url: str) -> str:
     """The snippet a customer pastes into their site.
 
-    Points at the widget's own Vercel deployment — never back at this API.
+    Points at the tool's permanent address, never at a single build, and never
+    back at this API — a page we do not control must not stop working because a
+    tool was rebuilt, because a repair ran, or because our API is having a bad
+    morning.
     """
-    safe_url = html.escape(deployment_url, quote=True)
-    parsed = urlsplit(deployment_url)
+    safe_url = html.escape(embed_url, quote=True)
+    parsed = urlsplit(embed_url)
     origin = json.dumps(f"{parsed.scheme}://{parsed.netloc}")
     return (
         '<div data-magnit-embed style="width:100%">'
@@ -187,6 +236,15 @@ def build_embed_code(deployment_url: str) -> str:
         "var s=document.currentScript,c=s&&s.previousElementSibling,"
         "f=c&&c.querySelector('[data-magnit-frame]');if(!f)return;"
         f"var o={origin};"
+        # The campaign that brought the visitor to the page is on the page's own
+        # URL, and an iframe sees none of it. Without this hand-off every lead a
+        # customer's paid traffic produced was attributed to nothing, and their
+        # attribution report was a single "direct" row.
+        "try{var q=new URLSearchParams(location.search),u=new URL(f.src),n=0;"
+        "['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid']"
+        ".forEach(function(k){var v=q.get(k);"
+        "if(v&&!u.searchParams.has(k)){u.searchParams.set(k,v.slice(0,200));n++;}});"
+        "if(n)f.src=u.toString();}catch(_){}"
         "window.addEventListener('message',function(e){"
         "if(e.source!==f.contentWindow||e.origin!==o||!e.data||"
         "e.data.type!=='magnit:resize')return;"
@@ -366,8 +424,24 @@ async def claim_guest_concepts(
     selected_index: int,
     evidence: SiteEvidence,
     brief: CreationBrief | None = None,
+    claim_key: str | None = None,
 ) -> Widget:
-    """Attach a signed free analysis to its new owner without another AI call."""
+    """Attach a signed free analysis to its new owner without another AI call.
+
+    Idempotent on ``claim_key``. This request is sent from a browser at the
+    moment an account is created, which is exactly where retries happen — a
+    refresh, an impatient second click, a timeout the client cannot distinguish
+    from a failure. Each of those used to produce another tool in the workspace,
+    so the customer's first sight of the product was three copies of the thing
+    they asked for once.
+    """
+    if claim_key:
+        existing = await db.scalar(
+            select(Widget).where(Widget.user_id == user_id, Widget.claim_key == claim_key)
+        )
+        if existing is not None:
+            return existing
+
     selected_blueprint = blueprints[selected_index]
     selected_concept = concepts[selected_index]
     widget = Widget(
@@ -391,6 +465,7 @@ async def claim_guest_concepts(
         source_evidence=evidence.model_dump(mode="json"),
         source_content_fingerprint=evidence.content_fingerprint,
         source_brand_fingerprint=evidence.brand_fingerprint,
+        claim_key=claim_key,
     )
     db.add(widget)
     await db.flush()
@@ -444,12 +519,23 @@ async def list_user_widgets(db: AsyncSession, user_id: uuid.UUID) -> list[Widget
 
 
 async def record_deployment(
-    db: AsyncSession, widget: Widget, deployment_url: str, trigger: str
+    db: AsyncSession,
+    widget: Widget,
+    deployment_url: str,
+    trigger: str,
+    *,
+    embed_url: str | None = None,
+    provider_deployment_id: str | None = None,
 ) -> WidgetDeployment:
     """Point the widget at a new deployment and log it for rollback.
 
     Previous rows are demoted to ``is_current=False`` so exactly one row is
     current and the next-newest is an unambiguous rollback target.
+
+    The embed address is deliberately write-once. Once a customer has pasted the
+    snippet onto their website we cannot edit that page, so the address in it has
+    to outlive every rebuild, repair and rollback. Only the first publish may set
+    it; later deploys change what it serves, never where it points.
     """
     await db.execute(
         update(WidgetDeployment)
@@ -460,6 +546,7 @@ async def record_deployment(
     record = WidgetDeployment(
         widget_id=widget.id,
         deployment_url=deployment_url,
+        provider_deployment_id=provider_deployment_id,
         trigger=trigger,
         is_current=True,
     )
@@ -467,7 +554,10 @@ async def record_deployment(
 
     widget.status = "active"
     widget.deployment_url = deployment_url
-    widget.embed_code = build_embed_code(deployment_url)
+    # `or deployment_url` covers the local-hosting path, where the build already
+    # lives at a stable per-tool URL and there is no separate alias to assign.
+    widget.embed_url = widget.embed_url or embed_url or deployment_url
+    widget.embed_code = build_embed_code(widget.embed_url)
     widget.deployed_at = datetime.now(UTC)
     await db.flush()
     return record
@@ -482,15 +572,29 @@ async def deploy_existing_widget(db: AsyncSession, widget_id: str, user_id: uuid
         raise WidgetBuildMissing(widget_id)
 
     deployment = await deploy_directory(str(dist_dir), str(widget.id))
-    await record_deployment(db, widget, deployment.url, trigger="redeploy")
+    await record_deployment(
+        db,
+        widget,
+        deployment.url,
+        trigger="redeploy",
+        embed_url=deployment.embed_url,
+        provider_deployment_id=deployment.provider_deployment_id,
+    )
     return widget
 
 
-async def rollback_widget(db: AsyncSession, widget_id: str, user_id: uuid.UUID) -> Widget:
-    """Point the widget back at its previous deployment.
+class RollbackUnavailable(Exception):
+    """The previous build exists but the live address could not be moved to it."""
 
-    Cheap and instant compared with a rebuild: the old Vercel deployment is
-    immutable and still served, so this is just re-pointing the embed.
+
+async def rollback_widget(db: AsyncSession, widget_id: str, user_id: uuid.UUID) -> Widget:
+    """Serve the previous build from the tool's permanent address.
+
+    Cheap and instant compared with a rebuild: the old deployment is immutable
+    and still hosted, so this only moves which one the embedded address resolves
+    to. That move is the whole operation — a rollback that updated our database
+    but left the customer's website serving the broken build would be a lie told
+    to the one person who came here because something was wrong.
     """
     widget = await get_owned_widget(db, widget_id, user_id)
 
@@ -507,7 +611,28 @@ async def rollback_widget(db: AsyncSession, widget_id: str, user_id: uuid.UUID) 
     if previous is None:
         raise WidgetBuildMissing(widget_id)
 
-    await record_deployment(db, widget, previous.deployment_url, trigger="rollback")
+    # When the embed already points straight at this build's own URL there is no
+    # alias to move — that is the local-hosting case, where one address serves
+    # whatever is on disk.
+    if widget.embed_url and widget.embed_url != previous.deployment_url:
+        if not previous.provider_deployment_id:
+            # Deployed before we started recording provider ids. Saying so is
+            # the only honest option: we cannot move the live address, and
+            # pretending otherwise would leave the broken build serving.
+            raise RollbackUnavailable(widget_id)
+        try:
+            await promote_deployment(previous.provider_deployment_id, str(widget.id))
+        except Exception as exc:  # provider-shaped failure; re-raised as our own
+            logger.exception("Could not roll widget %s back to its previous build", widget.id)
+            raise RollbackUnavailable(widget_id) from exc
+
+    await record_deployment(
+        db,
+        widget,
+        previous.deployment_url,
+        trigger="rollback",
+        provider_deployment_id=previous.provider_deployment_id,
+    )
     logger.info("Rolled widget %s back to %s", widget.id, previous.deployment_url)
     return widget
 
@@ -525,23 +650,67 @@ async def list_deployments(
     return list(result.scalars().all())
 
 
-async def record_impression(db: AsyncSession, widget_id: str) -> bool:
-    """Increment a widget's view count. Returns whether the widget existed.
+def _own_host(host: str) -> bool:
+    """Whether a referrer host is one of ours rather than a customer's site."""
+    ours = {
+        urlsplit(url).netloc.lower()
+        for url in (settings.frontend_base_url, settings.site_url)
+        if url
+    }
+    return host.lower() in ours
+
+
+def embed_host_of(source_url: str | None) -> str | None:
+    """The customer's own host from a referrer, or ``None`` if it is not one.
+
+    The owner previewing their tool in our dashboard, and the build screen's own
+    live preview, both load the same public URL and both send a referrer — ours.
+    Treating those as evidence of installation is how "verify installation"
+    could pass for a tool that had never been pasted anywhere, and how a
+    workspace's own tab inflated the visitor count it was being judged on.
+    """
+    if not source_url:
+        return None
+    host = urlsplit(source_url).netloc
+    if not host or _own_host(host):
+        return None
+    return host[:255]
+
+
+async def record_impression(
+    db: AsyncSession, widget_id: str, source_url: str | None = None
+) -> bool:
+    """Record one view. Returns whether the widget existed.
 
     Called by the deployed widget on mount, so it is unauthenticated and must be
-    cheap: a single conditional UPDATE with no prior SELECT, and only for widgets
-    that are actually live. No per-view row is stored — a counter is all the
-    conversion-rate calculation needs, and it keeps an embedded widget from being
-    used to grow the database.
+    cheap. No per-view row is stored — a counter is all the conversion-rate
+    calculation needs, and it keeps an embedded widget from being used to grow
+    the database.
+
+    Views from our own screens are not counted at all. They are the owner
+    looking at their own work, and counting them means every tool's conversion
+    rate is quietly diluted by the person who built it.
     """
     parsed = _coerce_widget_id(widget_id)
     if parsed is None:
         return False
 
+    host = embed_host_of(source_url)
+    if source_url and host is None:
+        # One of our own screens. Confirm the widget exists so the caller's
+        # contract is unchanged, then record nothing.
+        return bool(await db.scalar(select(Widget.id).where(Widget.id == parsed)))
+
+    values: dict = {"impressions_count": Widget.impressions_count + 1}
+    if host:
+        # First sighting on a real page is the moment the tool is installed —
+        # no interaction required, because a visitor who scrolls past without
+        # touching it has still proved the snippet is on the page.
+        values["embed_host"] = host
+        values["first_embedded_at"] = func.coalesce(Widget.first_embedded_at, datetime.now(UTC))
+
     result = await db.execute(
-        update(Widget)
-        .where(Widget.id == parsed, Widget.status == "active")
-        .values(impressions_count=Widget.impressions_count + 1)
+        update(Widget).where(Widget.id == parsed, Widget.status == "active").values(**values)
     )
     return rows_affected(result) > 0
 

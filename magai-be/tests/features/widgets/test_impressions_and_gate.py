@@ -83,6 +83,21 @@ class TestImpressionEndpoint:
         assert response.status_code == 204
         assert response.headers["access-control-allow-origin"] == "*"
 
+    async def test_account_patch_preflight_is_not_mistaken_for_public_lead_capture(self, client):
+        lead_id = uuid.uuid4()
+        response = await client.options(
+            f"/api/leads/{lead_id}",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "PATCH",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+        assert "PATCH" in response.headers["access-control-allow-methods"]
+        assert "authorization" in response.headers["access-control-allow-headers"].lower()
+
 
 class TestConversionRate:
     async def test_is_null_before_any_view(self, as_user, db, user):

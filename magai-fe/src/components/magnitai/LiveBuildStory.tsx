@@ -59,7 +59,11 @@ export function LiveBuildStory({ widgetId }: { widgetId: string }) {
         .then((data) => {
           if (data.title) setTitle(data.title);
           if (data.status === "active") {
-            if (data.deployment_url) setDeployUrl(data.deployment_url);
+            // The permanent address, not this build's own URL: the sentence
+            // under this preview promises it stays the same, and the link the
+            // owner opens from here should be the one that actually will.
+            const live = data.embed_url ?? data.deployment_url;
+            if (live) setDeployUrl(live);
             setStatuses(Object.fromEntries(STAGES.map((stage) => [stage.id, "complete"])));
           } else if (data.status === "failed") {
             setFailure(data.build_error || "The build didn't finish.");
@@ -99,7 +103,10 @@ export function LiveBuildStory({ widgetId }: { widgetId: string }) {
             What the pipeline reported
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">{failure}</p>
-          <button onClick={() => navigate({ to: "/build" })} className="btn btn-primary mt-7">
+          <button
+            onClick={() => navigate({ to: "/build", search: { resume: widgetId } })}
+            className="btn btn-primary mt-7"
+          >
             <RotateCcw className="size-4" aria-hidden="true" />
             Return to the brief
           </button>
@@ -207,7 +214,11 @@ export function LiveBuildStory({ widgetId }: { widgetId: string }) {
               </p>
               <button
                 onClick={() =>
-                  navigate({ to: "/dashboard/widgets/$widgetId", params: { widgetId } })
+                  navigate({
+                    to: "/dashboard/widgets/$widgetId",
+                    params: { widgetId },
+                    search: { tab: "embed" },
+                  })
                 }
                 className="btn btn-accent"
               >

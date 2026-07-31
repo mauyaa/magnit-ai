@@ -14,8 +14,10 @@ Magnitai should feel authored without making the product unfamiliar.
 - A saturated colour must communicate a role, not fill an empty space.
 - Every page gets one dominant idea and one dominant next action.
 
-The approved landing hero and the `MADE TO BE / USED.` output showcase are the
-reference quality bar. They are preserved as-is.
+The `MADE TO BE / USED.` output showcase is the reference quality bar and is
+preserved as-is. The landing hero has one additional responsibility: let a
+visitor enter their real website without first navigating through another
+screen.
 
 ## Evidence behind the system
 
@@ -120,6 +122,17 @@ Avoid:
 - repeated pill labels and badges;
 - three adjacent sections with identical card geometry;
 - excessive rounded containers around plain text.
+
+The landing hero is the product's only public URL entry:
+
+- the website field and `See my directions` action are visible in the first
+  viewport;
+- validation happens before navigation and the accepted address is carried into
+  the builder;
+- the reassurance beside it states that previewing needs no account and nothing
+  publishes automatically;
+- later demonstrations link back to this journey rather than introducing
+  another competing form.
 
 ### Examples
 

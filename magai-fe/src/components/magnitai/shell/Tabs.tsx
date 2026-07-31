@@ -53,7 +53,7 @@ export function WidgetTabs({
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
                 <span
-                  className={`tabular rounded-full px-1.5 py-0.5 text-[11px] leading-none ${
+                  className={`tabular rounded-full px-1.5 py-0.5 text-xs leading-none ${
                     selected ? "bg-secondary text-foreground" : "bg-n-100 text-muted-foreground"
                   }`}
                 >

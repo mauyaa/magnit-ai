@@ -1,13 +1,16 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, ExternalLink, Globe2, Loader2, Plus, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { RequireAuth } from "@/components/magnitai/RequireAuth";
 import { PageHeader, StatusPill } from "@/components/magnitai/shell/PageHeader";
 import { percentChange, StatCard, StatRow } from "@/components/magnitai/shell/StatCard";
 import { WorkspaceShell } from "@/components/magnitai/shell/WorkspaceShell";
+import { WorkspacePulse } from "@/components/magnitai/WorkspacePulse";
 import { usePortfolioAnalytics, useWidgets, type WidgetData } from "@/lib/api";
 import { journeyDomain, loadSavedJourney, type SavedJourney } from "@/lib/journey-storage";
+import { recommendationFor } from "@/lib/workspace-recommendation";
+import { normalizeWebsiteUrl, websiteFieldValue } from "@/lib/website-url";
 
 export const Route = createFileRoute("/dashboard/")({
   head: () => ({ meta: [{ title: "Overview · Magnitai" }] }),
@@ -89,9 +92,7 @@ function ToolCanvas({ widget }: { widget: WidgetData }) {
       className="relative h-44 overflow-hidden px-5 py-4"
       style={{ color: primary, backgroundColor: background }}
     >
-      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-50">
-        {widget.widget_type.replaceAll("_", " ")}
-      </span>
+      <span className="group-label opacity-50">{widget.widget_type.replaceAll("_", " ")}</span>
       <h3 className="mt-2 line-clamp-2 max-w-[18ch] text-xl font-semibold leading-[1.1] tracking-[-0.03em]">
         {widget.title}
       </h3>
@@ -100,7 +101,7 @@ function ToolCanvas({ widget }: { widget: WidgetData }) {
           <span className="block h-full w-[62%] rounded-full" style={{ backgroundColor: accent }} />
         </div>
         <div
-          className="mt-3 flex h-8 items-center justify-between rounded-md px-2.5 text-[11px] font-semibold"
+          className="mt-3 flex h-8 items-center justify-between rounded-md px-2.5 text-xs font-semibold"
           style={{ backgroundColor: accent, color: background }}
         >
           <span>{status.tone === "live" ? "See your result" : "Not published yet"}</span>
@@ -147,7 +148,7 @@ function ToolCard({ widget }: { widget: WidgetData }) {
          * called "conversion" is what made the old screen contradict itself.
          */}
         <div className="mt-3.5 border-t border-border pt-3">
-          <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-n-400">All time</p>
+          <p className="group-label text-n-400">All time</p>
         </div>
         <dl className="mt-2 grid grid-cols-3 gap-2">
           {[
@@ -156,7 +157,7 @@ function ToolCard({ widget }: { widget: WidgetData }) {
             ["Lead rate", leadRate],
           ].map(([label, value]) => (
             <div key={label}>
-              <dt className="text-[11px] text-muted-foreground">{label}</dt>
+              <dt className="text-xs text-muted-foreground">{label}</dt>
               <dd className="tabular mt-0.5 text-sm font-medium text-foreground">{value}</dd>
             </div>
           ))}
@@ -181,7 +182,7 @@ function ResumeBanner({ journey }: { journey: SavedJourney }) {
       <div className="min-w-0">
         <p className="text-sm font-medium text-foreground">
           {autopilot
-            ? "Your AI-built direction is ready"
+            ? "Your lead magnet is ready"
             : `You left off partway through ${journeyDomain(journey.target_url)}`}
         </p>
         <p className="mt-0.5 truncate text-sm text-muted-foreground">
@@ -201,7 +202,9 @@ function ResumeBanner({ journey }: { journey: SavedJourney }) {
 /** Nothing built yet: one field, one action, nothing else on the screen. */
 function EmptyWorkspace() {
   const navigate = useNavigate();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="surface mx-auto max-w-xl px-6 py-12 text-center sm:px-10 sm:py-16">
@@ -212,15 +215,20 @@ function EmptyWorkspace() {
         Start with your website
       </h2>
       <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-        Magnitai reads your site, then proposes two tools built from what it finds. It takes about
-        two minutes.
+        Magnitai reads your site, then proposes two lead magnets built from what it finds.
       </p>
 
       <form
         className="mx-auto mt-7 max-w-sm text-left"
         onSubmit={(event) => {
           event.preventDefault();
-          navigate({ to: "/build", search: value ? { site: value } : {} });
+          const normalized = normalizeWebsiteUrl(value);
+          if (!normalized) {
+            setError("Enter a complete website, like northsidedental.com");
+            inputRef.current?.focus();
+            return;
+          }
+          navigate({ to: "/build", search: { site: websiteFieldValue(normalized) } });
         }}
       >
         <label htmlFor="first-site" className="mb-1.5 block text-sm font-medium text-foreground">
@@ -229,20 +237,76 @@ function EmptyWorkspace() {
         <div className="flex items-center gap-1.5 rounded-lg border border-border-strong bg-card py-1.5 pl-3 pr-1.5 shadow-raised focus-within:border-foreground/40">
           <span className="shrink-0 text-sm text-n-400">https://</span>
           <input
+            ref={inputRef}
             id="first-site"
+            type="text"
+            inputMode="url"
+            autoComplete="url"
             spellCheck={false}
             placeholder="northsidedental.com"
             value={value}
-            onChange={(event) => setValue(event.target.value.replace(/^https?:\/\//i, ""))}
+            onChange={(event) => {
+              setValue(websiteFieldValue(event.target.value));
+              if (error) setError(null);
+            }}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "first-site-error" : undefined}
             className="h-8 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-n-400"
           />
           <button type="submit" className="btn btn-primary h-8 shrink-0 px-3 text-sm">
             Start
           </button>
         </div>
+        {error ? (
+          <p id="first-site-error" role="alert" className="mt-2 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
       </form>
     </div>
   );
+}
+
+function businessOutcomeFor({
+  starts,
+  completions,
+  leads,
+  ctaClicks,
+}: {
+  starts: number;
+  completions: number;
+  leads: number;
+  ctaClicks: number;
+}) {
+  let title = "No visitor activity in the last 30 days";
+  let detail =
+    "Magnitai is ready to measure the full journey as soon as a live tool receives traffic.";
+
+  if (leads > 0) {
+    title = `${leads.toLocaleString()} ${
+      leads === 1 ? "person became a lead" : "people became leads"
+    } in the last 30 days`;
+    detail = `${starts.toLocaleString()} started a tool, ${completions.toLocaleString()} reached a result, and ${ctaClicks.toLocaleString()} took the final action.`;
+  } else if (ctaClicks > 0) {
+    title = `${ctaClicks.toLocaleString()} ${
+      ctaClicks === 1 ? "person took" : "people took"
+    } the final action`;
+    detail = `${completions.toLocaleString()} reached a result. No contact details were captured, so review the result and capture step before sending more traffic.`;
+  } else if (completions > 0) {
+    title = `${completions.toLocaleString()} ${
+      completions === 1 ? "person reached" : "people reached"
+    } a useful result`;
+    detail =
+      "No one continued to the final action or became a lead yet. The result screen is the next commercial moment to improve.";
+  } else if (starts > 0) {
+    title = `${starts.toLocaleString()} ${
+      starts === 1 ? "person started" : "people started"
+    }, but no one finished`;
+    detail =
+      "The traffic is real, but the experience is losing people before the result. Question-level analytics shows where they stop.";
+  }
+
+  return { title, detail };
 }
 
 function DashboardHome() {
@@ -258,16 +322,25 @@ function DashboardHome() {
 
   const widgets = data?.widgets ?? [];
   const live = widgets.filter((w) => w.status === "active").length;
+  const recommendation = recommendationFor(widgets);
 
   const daily = analytics?.daily ?? [];
   const half = Math.floor(daily.length / 2);
-  const sum = (rows: typeof daily, key: "starts" | "leads") =>
+  const sum = (rows: typeof daily, key: "starts" | "completions" | "leads" | "cta_clicks") =>
     rows.reduce((total, row) => total + row[key], 0);
 
   const currentStarts = sum(daily.slice(half), "starts");
   const previousStarts = sum(daily.slice(0, half), "starts");
+  const currentCompletions = sum(daily.slice(half), "completions");
   const currentLeads = sum(daily.slice(half), "leads");
   const previousLeads = sum(daily.slice(0, half), "leads");
+  const currentCtaClicks = sum(daily.slice(half), "cta_clicks");
+  const businessOutcome = businessOutcomeFor({
+    starts: currentStarts,
+    completions: currentCompletions,
+    leads: currentLeads,
+    ctaClicks: currentCtaClicks,
+  });
 
   const currentRate = currentStarts > 0 ? (currentLeads / currentStarts) * 100 : null;
   const previousRate = previousStarts > 0 ? (previousLeads / previousStarts) * 100 : null;
@@ -297,7 +370,7 @@ function DashboardHome() {
     <WorkspaceShell breadcrumb={[{ label: "Overview" }]}>
       <PageHeader
         title="Overview"
-        description="Every tool Magnitai is running for you, and what they brought in."
+        description="Results, leads and the one action most worth taking."
         meta={
           widgets.length > 0 ? (
             <StatusPill tone={live > 0 ? "live" : "idle"}>
@@ -315,6 +388,14 @@ function DashboardHome() {
         <EmptyWorkspace />
       ) : (
         <>
+          {!pending && recommendation ? (
+            <WorkspacePulse
+              widgets={widgets}
+              recommendation={recommendation}
+              outcome={businessOutcome}
+            />
+          ) : null}
+
           <div className="flex items-baseline justify-between gap-4 pb-3">
             <h2 className="text-base font-medium text-foreground">Last 30 days</h2>
             <span className="text-xs text-muted-foreground">compared with the 30 days before</span>
@@ -337,7 +418,11 @@ function DashboardHome() {
               delta={
                 currentRate !== null && previousRate !== null
                   ? { percent: percentChange(currentRate, previousRate) }
-                  : undefined
+                  : // `{ percent: null }` rather than nothing: there *is* no
+                    // prior period, which is what the neighbouring cards say in
+                    // the same situation. Passing undefined left this one card
+                    // in a row of four with an empty line under its number.
+                    { percent: null }
               }
               note={currentRate === null ? "Starts after your first visitor" : undefined}
             />

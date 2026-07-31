@@ -109,7 +109,7 @@ export function ActivityChart({ daily }: { daily: PortfolioAnalytics["daily"] })
         {/* Y axis. Three ticks: nobody reads more, and each one costs a gridline. */}
         <div className="flex w-8 shrink-0 flex-col justify-between py-px text-right">
           {[...ticks].reverse().map((tick) => (
-            <span key={tick} className="tabular text-[11px] leading-none text-muted-foreground">
+            <span key={tick} className="tabular text-xs leading-none text-muted-foreground">
               {tick}
             </span>
           ))}
@@ -189,10 +189,8 @@ export function ActivityChart({ daily }: { daily: PortfolioAnalytics["daily"] })
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-4 pl-11">
-        <span className="text-[11px] text-muted-foreground">{buckets[0]?.label}</span>
-        <span className="text-[11px] text-muted-foreground">
-          {buckets[buckets.length - 1]?.label}
-        </span>
+        <span className="text-xs text-muted-foreground">{buckets[0]?.label}</span>
+        <span className="text-xs text-muted-foreground">{buckets[buckets.length - 1]?.label}</span>
       </div>
 
       {/* Two series, so a legend is not optional. */}

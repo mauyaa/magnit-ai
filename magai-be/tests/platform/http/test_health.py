@@ -14,6 +14,7 @@ import asyncio
 import pytest
 
 from app.platform.http import health
+from app.platform.observability.metrics import render_metrics
 
 
 def _stub_checks(monkeypatch, **results: str) -> None:
@@ -45,6 +46,18 @@ class TestLiveness:
 
         assert response.status_code == 200
         assert response.json() == {"status": "alive"}
+
+
+async def test_api_metadata_uses_the_customer_facing_product_name(app):
+    assert app.title == "Magnitai"
+
+
+def test_metrics_register_the_commercial_activation_funnel():
+    body, _ = render_metrics()
+    metrics = body.decode()
+
+    assert "magai_product_activation_events_total" in metrics
+    assert "magai_first_value_duration_seconds" in metrics
 
 
 class TestReadiness:
@@ -86,6 +99,20 @@ class TestReadiness:
         checks = (await client.get("/health/ready")).json()["checks"]
 
         assert set(checks) == {"database", "redis_events", "celery_broker", "celery_backend"}
+
+    async def test_local_build_mode_requires_only_the_database(self, client, monkeypatch):
+        monkeypatch.setattr(health.settings, "vercel_api_token", "")
+        _stub_checks(
+            monkeypatch,
+            redis_events="in_memory",
+            celery_broker="in_process",
+            celery_backend="not_required",
+        )
+
+        response = await client.get("/health/ready")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready"
 
 
 class TestAggregateHealth:

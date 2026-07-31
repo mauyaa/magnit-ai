@@ -1,5 +1,5 @@
 /**
- * HTTP client for the MagnetAI API.
+ * HTTP client for the Magnitai API.
  *
  * Responsibilities that would otherwise be duplicated in every hook:
  *  - attach the bearer token

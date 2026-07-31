@@ -5,7 +5,7 @@ import { MagnitaiLogo } from "./ui/MagnitaiLogo";
 
 const FOOTER_LINKS = [
   { label: "How it works", to: "/how-it-works" },
-  { label: "What we build", to: "/examples" },
+  { label: "Examples", to: "/examples" },
   { label: "Pricing", to: "/pricing" },
   { label: "Privacy", to: "/privacy" },
   { label: "Terms", to: "/terms" },
@@ -24,10 +24,10 @@ export function MarketingFooter() {
         <div className="grid items-end gap-10 border-b border-inverse-border pb-14 lg:grid-cols-[1fr_auto]">
           <div>
             <span className="font-mono text-[10px] uppercase tracking-[0.17em] text-brand-on-inverse">
-              Ready when you are
+              Start with the traffic you already have
             </span>
             <h2 className="mt-5 max-w-[15ch] font-display text-[clamp(2.6rem,5vw,4.6rem)] font-normal leading-[0.94] tracking-[-0.05em]">
-              Make your next page do something useful.
+              Build the lead magnet your website is missing.
             </h2>
           </div>
 
@@ -35,7 +35,7 @@ export function MarketingFooter() {
             to="/build"
             className="group inline-flex h-14 min-w-56 items-center justify-between gap-6 rounded-full bg-brand px-5 text-sm font-semibold text-foreground shadow-float transition-transform hover:-translate-y-1"
           >
-            Start with your website
+            Build from my website
             <span className="grid size-10 place-items-center rounded-full bg-inverse text-inverse-foreground">
               <ArrowRight
                 className="size-4 transition-transform group-hover:translate-x-0.5"

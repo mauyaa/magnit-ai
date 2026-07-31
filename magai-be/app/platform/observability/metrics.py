@@ -124,6 +124,21 @@ widget_impressions_total = Counter(
     "Views recorded by deployed widgets — the denominator for conversion rate.",
 )
 
+product_activation_events_total = Counter(
+    "magai_product_activation_events_total",
+    (
+        "Server-confirmed milestones in Magnitai's own acquisition-to-publish journey. "
+        "Stages are deliberately fixed and contain no user, URL, or workspace labels."
+    ),
+    ["stage", "outcome"],
+)
+
+first_value_duration_seconds = Histogram(
+    "magai_first_value_duration_seconds",
+    "Time from a first-look request to two usable, site-specific recommendations.",
+    buckets=(1, 2.5, 5, 10, 20, 30, 45, 60, 90, 120, 180),
+)
+
 
 def _route_template(request: Request) -> str:
     """The matched route's path template, or ``unmatched`` for 404s."""

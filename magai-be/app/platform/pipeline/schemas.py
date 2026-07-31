@@ -422,8 +422,17 @@ class DesignTokens(BaseModel):
 
 
 class DeploymentResult(BaseModel):
+    # The immutable address of this exact build. Changes every deploy, so it is
+    # a history and rollback handle — never something to hand a customer.
     url: str
+    # The address that stays put across every rebuild, repair and rollback.
+    # This is what goes in the snippet pasted onto a customer's website. Empty
+    # for a build with publishing skipped, exactly as ``url`` is.
+    embed_url: str = ""
     widget_id: str
+    # The provider's own id for this deployment, needed to re-point the stable
+    # address at an older build during a rollback.
+    provider_deployment_id: str | None = None
 
 
 class ProjectFile(BaseModel):

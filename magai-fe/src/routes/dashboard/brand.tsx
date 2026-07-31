@@ -173,7 +173,7 @@ function _SectionHeading({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="tabular mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-[10px] text-muted-foreground">
+      <span className="tabular mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-xs text-muted-foreground">
         {number}
       </span>
       <div className="min-w-0 flex-1">
@@ -262,7 +262,7 @@ function BrandMark({ logoUrl, accent }: { logoUrl: string | null; accent: string
 
   return (
     <span
-      className="grid size-8 place-items-center text-[11px] font-semibold"
+      className="grid size-8 place-items-center text-xs font-semibold"
       style={{ borderRadius: "32%", background: accent, color: readableInk(accent) }}
       aria-hidden="true"
     >
@@ -285,9 +285,7 @@ function PreviewQuestion({
   return (
     <>
       <div className="flex items-center justify-between gap-4">
-        <p className="text-[11px] font-medium uppercase tracking-[0.12em] opacity-55">
-          Question 2 of 5
-        </p>
+        <p className="group-label opacity-55">Question 2 of 5</p>
         <p className="text-xs opacity-55">40% complete</p>
       </div>
       <div className="mt-2 h-1 overflow-hidden rounded-full bg-current opacity-15">
@@ -296,7 +294,7 @@ function PreviewQuestion({
 
       <div className="mt-8">
         <p className="text-sm font-medium opacity-60">Team & operations</p>
-        <h3 className="mt-2 max-w-xl text-[clamp(1.7rem,3vw,2.75rem)] font-semibold leading-[1.02] tracking-[-0.04em]">
+        <h3 className="mt-2 max-w-xl text-[clamp(1.8rem,3vw,2.8rem)] font-semibold leading-[1.02] tracking-[-0.04em]">
           What is the biggest constraint on your growth right now?
         </h3>
         <p className="mt-3 max-w-lg text-sm leading-6 opacity-65">
@@ -366,9 +364,7 @@ function PreviewResult({
       >
         <Check className="size-5" strokeWidth={2.4} aria-hidden="true" />
       </span>
-      <p className="mt-7 text-[11px] font-medium uppercase tracking-[0.12em] opacity-55">
-        Your readiness result
-      </p>
+      <p className="mt-7 group-label opacity-55">Your readiness result</p>
       <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-2">
         <p className="tabular text-7xl font-semibold leading-none tracking-[-0.065em]">82</p>
         <p className="pb-1 text-sm opacity-60">out of 100</p>
@@ -415,9 +411,7 @@ function PreviewLead({
 }) {
   return (
     <div className="mx-auto max-w-xl py-3">
-      <p className="text-[11px] font-medium uppercase tracking-[0.12em] opacity-55">
-        Your action plan is ready
-      </p>
+      <p className="group-label opacity-55">Your action plan is ready</p>
       <h3 className="mt-3 text-[clamp(1.8rem,3vw,2.8rem)] font-semibold leading-[1.02] tracking-[-0.04em]">
         Where should we send your personalised recommendations?
       </h3>
@@ -449,7 +443,7 @@ function PreviewLead({
         Send my action plan
         <ArrowRight className="size-4" aria-hidden="true" />
       </span>
-      <p className="mt-3 text-center text-[11px] leading-5 opacity-50">
+      <p className="mt-3 text-center text-xs leading-5 opacity-50">
         By continuing, you agree to be contacted about your result.
       </p>
     </div>
@@ -503,11 +497,11 @@ function BrandPreview({
             <BrandMark logoUrl={draft.logo_url} accent={accent} />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">Your company</p>
-              <p className="truncate text-[11px] opacity-50">Growth readiness audit</p>
+              <p className="truncate text-xs opacity-50">Growth readiness audit</p>
             </div>
           </div>
           <span
-            className="hidden items-center gap-1.5 text-[11px] font-medium sm:inline-flex"
+            className="hidden items-center gap-1.5 text-xs font-medium sm:inline-flex"
             style={{ color: contrast >= 4.5 ? ink : accent }}
           >
             <CheckCircle2 className="size-3.5" aria-hidden="true" />
@@ -533,7 +527,7 @@ function BrandPreview({
         </div>
 
         <div
-          className="flex min-h-12 items-center justify-between gap-4 border-t px-5 text-[11px] opacity-55 sm:px-7"
+          className="flex min-h-12 items-center justify-between gap-4 border-t px-5 text-xs opacity-55 sm:px-7"
           style={{ borderColor: `${ink}1F` }}
         >
           <span>Powered by Magnitai</span>
@@ -620,9 +614,7 @@ function BrandStudioExperience() {
     return (
       <>
         <div className="max-w-2xl">
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-            Brand system
-          </p>
+          <p className="group-label font-mono text-muted-foreground">Brand system</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
             Make every tool feel like you.
           </h1>
@@ -639,9 +631,7 @@ function BrandStudioExperience() {
     return (
       <>
         <div className="max-w-2xl">
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-            Brand system
-          </p>
+          <p className="group-label font-mono text-muted-foreground">Brand system</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
             Make every tool feel like you.
           </h1>
@@ -727,9 +717,7 @@ function BrandStudioExperience() {
     <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
         <div className="max-w-2xl">
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-            Brand system
-          </p>
+          <p className="group-label font-mono text-muted-foreground">Brand system</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">
             Make every tool feel like you.
           </h1>
@@ -824,7 +812,7 @@ function BrandStudioExperience() {
                   }`}
                 >
                   <span
-                    className={`grid size-5 shrink-0 place-items-center rounded-full border font-mono text-[9px] ${
+                    className={`grid size-5 shrink-0 place-items-center rounded-full border font-mono text-xs ${
                       itemPinned
                         ? "border-foreground bg-foreground text-background"
                         : "border-border-strong"
@@ -847,7 +835,7 @@ function BrandStudioExperience() {
           >
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                <p className="group-label font-mono text-muted-foreground">
                   Decision {sectionIndex + 1} of {BRAND_SECTIONS.length}
                 </p>
                 <h2
@@ -943,7 +931,7 @@ function BrandStudioExperience() {
                           style={{ background: tone.swatch, color: readableInk(tone.swatch) }}
                         >
                           <span className="block text-sm font-medium">{tone.label}</span>
-                          <span className="mt-1 block text-[11px] opacity-60">{tone.note}</span>
+                          <span className="mt-1 block text-xs opacity-60">{tone.note}</span>
                           {active && (
                             <Check
                               className="absolute bottom-3 right-3 size-4"
@@ -1035,7 +1023,7 @@ function BrandStudioExperience() {
                         style={{ borderRadius: `${radius}px` }}
                         aria-hidden="true"
                       />
-                      <span className="tabular text-[10px] text-muted-foreground">{radius}px</span>
+                      <span className="tabular text-xs text-muted-foreground">{radius}px</span>
                     </button>
                   );
                 })}
@@ -1533,7 +1521,7 @@ const _LegacyBrandForm = function LegacyBrandForm() {
                           style={{ background: tone.swatch, color: swatchInk }}
                         >
                           <span className="block text-sm font-medium">{tone.label}</span>
-                          <span className="mt-1 block text-[11px] opacity-60">{tone.note}</span>
+                          <span className="mt-1 block text-xs opacity-60">{tone.note}</span>
                           {active && (
                             <Check
                               className="absolute bottom-3 right-3 size-4"
@@ -1651,7 +1639,7 @@ const _LegacyBrandForm = function LegacyBrandForm() {
                         style={{ borderRadius: `${radius}px` }}
                         aria-hidden="true"
                       />
-                      <span className="tabular text-[11px] text-muted-foreground">{radius}px</span>
+                      <span className="tabular text-xs text-muted-foreground">{radius}px</span>
                     </button>
                   );
                 })}

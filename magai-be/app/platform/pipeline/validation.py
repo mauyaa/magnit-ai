@@ -1,7 +1,7 @@
 """Validation of model-generated project files before they are built.
 
 The generated code is untrusted input. It is compiled and served from an isolated
-origin, so it cannot reach MagnetAI's data — but it can still waste a build slot,
+origin, so it cannot reach Magnitai's data — but it can still waste a build slot,
 escape the sandbox directory through a crafted path, or ship something that fails
 in the visitor's browser rather than at build time.
 
@@ -143,6 +143,84 @@ def uses_lead_capture(files: list[dict]) -> bool:
 def uses_decision_runtime(files: list[dict]) -> bool:
     """Whether result logic is delegated to the deterministic runtime contract."""
     return any(re.search(r"\bcalculateDecision\s*\(", f["content"]) for f in files)
+
+
+def reads_live_config(files: list[dict]) -> bool:
+    """Whether the app renders from the owner's current configuration."""
+    return any(re.search(r"\buseLiveConfig\s*\(", f["content"]) for f in files)
+
+
+# The funnel the workspace reports on. Impressions are recorded by the runtime
+# itself; these three are the ones only the app knows the moment for, and
+# without them the analytics screen shows visitors and leads with nothing in
+# between — which reads as "nobody engaged" rather than "we did not measure".
+_REQUIRED_MILESTONES = ("trackStart", "trackComplete", "trackResult")
+
+
+def missing_milestones(files: list[dict]) -> list[str]:
+    """Funnel milestones the generated app never reports."""
+    return [
+        name
+        for name in _REQUIRED_MILESTONES
+        if not any(re.search(rf"\b{name}\s*\(", f["content"]) for f in files)
+    ]
+
+
+# Short strings are not evidence of anything: "Yes", "Your budget" and "Email"
+# will legitimately appear in generated markup no matter where the question list
+# came from. A whole sentence appearing verbatim is a different matter.
+_COPY_MATCH_MIN_LENGTH = 16
+
+
+def _editable_copy(decision_spec: dict | None, outcomes: dict | None) -> list[str]:
+    """The strings an owner can change after the build, worth checking for.
+
+    Deliberately narrow. These are exactly the fields the question and result
+    editors write to — the ones the product tells the owner are live the moment
+    they save. Everything else the model writes is its own copy and may be
+    hardcoded freely.
+    """
+    candidates: list[str] = []
+
+    for question in (decision_spec or {}).get("questions") or []:
+        if isinstance(question, dict):
+            candidates.append(str(question.get("label") or ""))
+            candidates.append(str(question.get("help_text") or ""))
+
+    for band in (outcomes or {}).get("bands") or []:
+        if isinstance(band, dict):
+            candidates.append(str(band.get("label") or ""))
+            candidates.append(str(band.get("description") or ""))
+
+    for block in (outcomes or {}).get("advice") or []:
+        if isinstance(block, dict):
+            candidates.append(str(block.get("text") or ""))
+
+    return [text for text in (c.strip() for c in candidates) if len(text) >= _COPY_MATCH_MIN_LENGTH]
+
+
+def frozen_copy_in(
+    files: list[dict],
+    decision_spec: dict | None,
+    outcomes: dict | None,
+) -> list[str]:
+    """Owner-editable copy the model wrote into the source as a literal.
+
+    This is how "your edit is live" quietly became untrue. The runtime hands the
+    app the owner's current questions and score bands, but nothing stopped the
+    model from also typing them into the JSX. When it did, the deployed tool went
+    on asking the questions it was born with while ``calculateDecision`` scored
+    the visitor against the owner's new ones — the visible half and the scoring
+    half disagreeing, with no error anywhere to say so.
+
+    A literal match is strong evidence: code that maps over ``config.decisionSpec
+    .questions`` cannot contain the question's own wording.
+    """
+    found: list[str] = []
+    for text in _editable_copy(decision_spec, outcomes):
+        if any(text in item["content"] for item in files):
+            found.append(text)
+    return found
 
 
 # Tailwind's motion utilities. A generated app that uses any of these is

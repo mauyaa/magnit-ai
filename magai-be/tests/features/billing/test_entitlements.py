@@ -14,6 +14,7 @@ from app.features.billing.entitlements import (
 from app.features.billing.plans import Feature, all_plans, get_plan, next_plan_for
 from app.features.payments.models import Subscription
 from app.features.widgets.models import Widget
+from app.platform.config.settings import settings
 
 
 async def _subscribe(db, user, plan="studio", status="active", period_end=None):
@@ -239,10 +240,12 @@ class TestBillingRoutes:
     async def test_plan_catalog_is_public(self, client):
         response = await client.get("/api/billing/plans")
         assert response.status_code == 200
-        plans = response.json()["plans"]
+        body = response.json()
+        plans = body["plans"]
         assert [plan["id"] for plan in plans] == ["free", "studio", "scale"]
         assert plans[0]["purchasable"] is False
         assert plans[1]["purchasable"] is True
+        assert body["single_tool_price"] == settings.widget_launch_price_cents
 
     async def test_entitlements_require_authentication(self, client):
         assert (await client.get("/api/billing/entitlements")).status_code == 401

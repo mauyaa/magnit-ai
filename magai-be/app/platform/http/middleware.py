@@ -9,7 +9,7 @@ import uuid
 from contextvars import ContextVar
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
@@ -23,7 +23,10 @@ request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _PUBLIC_WIDGET_PATH = re.compile(
-    r"^/api/(?:leads/[0-9a-f-]+|widgets/[0-9a-f-]+/(?:impression|interactions))$",
+    (
+        r"^/api/(?:leads/[0-9a-f-]+|widgets/[0-9a-f-]+/"
+        r"(?:impression|interactions|runtime-config))$"
+    ),
     re.IGNORECASE,
 )
 
@@ -41,6 +44,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         started = time.perf_counter()
         try:
             response = await call_next(request)
+        except ClientDisconnect:
+            # A navigation or closed tab can cancel an in-flight request before
+            # Starlette has finished reading it. That is a client outcome, not a
+            # server crash: record it without a traceback and stop the exception
+            # from reaching Uvicorn's error logger.
+            response = Response(status_code=499)
         except Exception:
             duration_ms = (time.perf_counter() - started) * 1000
             logger.exception(
@@ -88,6 +97,33 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
+
+        if settings.local_builds_enabled and request.url.path.startswith("/local-widgets/"):
+            # Generated local widgets are intentionally iframeable from the
+            # configured frontend origins. Their entry HTML carries the same
+            # resource CSP as production; this response header adds the framing
+            # boundary that cannot be expressed in a meta tag.
+            frame_origins = " ".join(settings.cors_origins) or "'self'"
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("Referrer-Policy", "no-referrer-when-downgrade")
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                (
+                    "default-src 'none'; script-src 'self'; "
+                    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                    "font-src 'self' https://fonts.gstatic.com; "
+                    "img-src 'self' data:; connect-src 'self'; "
+                    f"frame-ancestors 'self' {frame_origins}; "
+                    "base-uri 'none'; form-action 'none'; object-src 'none'"
+                ),
+            )
+            response.headers.setdefault(
+                "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+            )
+            response.headers.setdefault("Cross-Origin-Opener-Policy", "unsafe-none")
+            response.headers.setdefault("Cross-Origin-Resource-Policy", "cross-origin")
+            response.headers.setdefault("Cache-Control", "no-cache")
+            return response
 
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
@@ -149,7 +185,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 class PublicWidgetCorsMiddleware(BaseHTTPMiddleware):
-    """Allow deployed widgets to call only their three anonymous runtime endpoints.
+    """Allow deployed widgets to call only their anonymous runtime endpoints.
 
     Account APIs retain the explicit-origin credentialed CORS policy. These paths
     accept no cookies or bearer token, so a wildcard origin is both safe and
@@ -157,7 +193,16 @@ class PublicWidgetCorsMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if not _PUBLIC_WIDGET_PATH.fullmatch(request.url.path):
+        requested_method = (
+            request.headers.get("access-control-request-method", "")
+            if request.method == "OPTIONS"
+            else request.method
+        )
+        allowed_method = "GET" if request.url.path.lower().endswith("/runtime-config") else "POST"
+        if (
+            not _PUBLIC_WIDGET_PATH.fullmatch(request.url.path)
+            or requested_method.upper() != allowed_method
+        ):
             return await call_next(request)
 
         if request.method == "OPTIONS":
@@ -165,7 +210,7 @@ class PublicWidgetCorsMiddleware(BaseHTTPMiddleware):
         else:
             response = await call_next(request)
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = f"{allowed_method}, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Access-Control-Max-Age"] = "600"
         response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"

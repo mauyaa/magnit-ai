@@ -12,6 +12,7 @@ import {
   type WidgetData,
 } from "@/lib/api";
 import { PlanGate } from "@/lib/plan";
+import { SaveConfirmation } from "./SaveConfirmation";
 import { ResultPreview } from "./ResultPreview";
 
 const FIELD =
@@ -754,11 +755,7 @@ function OutcomesEditorBody({ widget }: { widget: WidgetData }) {
           {dirty && !save.isPending && (
             <span className="text-xs text-muted-foreground">Unsaved changes</span>
           )}
-          {!dirty && save.isSuccess && (
-            <span aria-live="polite" className="text-xs text-success">
-              Live on your tool now
-            </span>
-          )}
+          {!dirty && save.isSuccess && <SaveConfirmation widget={widget} />}
           {save.isError && (
             <p role="alert" className="flex items-center gap-1.5 text-xs text-destructive">
               <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
@@ -789,7 +786,7 @@ function OutcomesEditorBody({ widget }: { widget: WidgetData }) {
         </div>
         <ResultPreview config={draft} widget={widget} score={previewScore} />
         <p className="mt-2.5 text-xs leading-5 text-muted-foreground">
-          Saving publishes these changes to the live tool straight away — no rebuild needed.
+          Saved changes reach your published tool within a minute. No rebuild, no re-paste.
         </p>
       </aside>
     </div>

@@ -76,6 +76,27 @@ class ClaimGuestConceptResponse(AnalyzeResponse):
     can_build: bool
 
 
+class ResumeBuildResponse(BaseModel):
+    """Everything needed to put a customer back where they left a draft.
+
+    ``concept`` is null when they analysed a site but never picked a direction.
+    That is an ordinary place to stop — it is the step immediately after the
+    read — and it used to be indistinguishable from a corrupt draft, because the
+    endpoint could only answer with a fully chosen concept and returned 409 for
+    anything else. The dashboard promoted those drafts as the next best action
+    and the flow then dropped the customer on an empty form, with their site
+    analysis silently discarded.
+    """
+
+    target_url: str
+    concept: CuratedConcept | None = None
+    # The directions we produced for this site. Present whether or not one has
+    # been chosen, so the flow can offer the choice again rather than re-reading
+    # a site we have already paid to analyse.
+    blueprints: list[Blueprint] = Field(default_factory=list)
+    brief: CreationBrief = Field(default_factory=CreationBrief)
+
+
 class ToolTypeResponse(BaseModel):
     """One entry in the catalogue of things a customer can ask us to build."""
 
@@ -135,6 +156,10 @@ class WidgetStatusResponse(BaseModel):
     status: str
     target_url: str
     deployment_url: str | None = None
+    # The address in the snippet on the customer's website. Stable across every
+    # rebuild, repair and rollback; `deployment_url` is not, and never was safe
+    # to hand to anyone.
+    embed_url: str | None = None
     embed_code: str | None = None
     leads_count: int
     impressions_count: int
@@ -239,6 +264,17 @@ class PortfolioAnalyticsResponse(BaseModel):
 
 def _default_lead_fields() -> list[Literal["email", "name", "company", "phone"]]:
     return ["email", "name"]
+
+
+class ImpressionRequest(BaseModel):
+    """What a deployed widget reports when it is first drawn.
+
+    Only the host page's address, and only so we can tell a real installation
+    from one of our own preview screens. It is never stored whole — the host is
+    kept, the path is not.
+    """
+
+    source_url: str | None = Field(default=None, max_length=2048)
 
 
 class LaunchSetupRequest(BaseModel):

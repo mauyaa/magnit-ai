@@ -241,7 +241,7 @@ export function OutputShowcase() {
       </div>
 
       <h2 id="showcase-title" className="sr-only">
-        Curated Magnit AI output examples
+        Curated Magnitai output examples
       </h2>
     </section>
   );

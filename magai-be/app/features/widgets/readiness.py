@@ -10,7 +10,6 @@ ticked.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import func, select
@@ -60,16 +59,24 @@ def _decision_of(widget: Widget) -> DecisionSpec | None:
         return None
 
 
-async def _embed_detected(db: AsyncSession, widget_id: uuid.UUID) -> bool:
-    """Whether the tool has been seen on a page that is not its own.
+async def _embed_detected(db: AsyncSession, widget: Widget) -> bool:
+    """Whether the tool has been seen on a page that is not one of ours.
 
-    A widget's deployment URL is publicly reachable, so the owner previewing it
-    in the dashboard produces impressions all by itself. Only a session carrying
-    a referrer proves it is embedded somewhere real.
+    Recorded at the moment of the view, not of an interaction. Requiring an
+    interaction made this both wrong ways at once: a correctly pasted embed that
+    nobody had touched yet could not be verified, while the owner clicking
+    through the preview inside their own dashboard verified it falsely. A view
+    with a referrer from the customer's own host is the honest signal — it means
+    the snippet is on a real page, whether or not anyone has used it yet.
     """
+    if widget.first_embedded_at is not None:
+        return True
+
+    # Tools published before views carried a referrer. An interaction from a
+    # real page is still proof for them.
     seen = await db.scalar(
         select(func.count(WidgetInteraction.id)).where(
-            WidgetInteraction.widget_id == widget_id,
+            WidgetInteraction.widget_id == widget.id,
             WidgetInteraction.source_url.is_not(None),
         )
     )
@@ -137,7 +144,7 @@ async def assess_readiness(
     # the `done` flag and the sentence describing it would double the round trips
     # for a panel that renders on every visit to the tool.
     delivery_ready = await _delivery_configured(db, widget, owner)
-    embedded = await _embed_detected(db, widget.id)
+    embedded = await _embed_detected(db, widget)
     can_publish = entitlements.can_publish(widget)
 
     checks = (
@@ -206,7 +213,13 @@ async def assess_readiness(
             id="embedded",
             label="Embedded on your site",
             detail=(
-                "Seen running on your website."
+                # The host, when we have it. "Seen running on your website" is
+                # a claim; "seen running on northsidedental.com" is evidence,
+                # and it is also how an owner spots that they pasted it onto
+                # their staging site by mistake.
+                f"Seen running on {widget.embed_host}."
+                if embedded and widget.embed_host
+                else "Seen running on your website."
                 if embedded
                 else "Paste the embed snippet into the page this tool belongs on."
             ),

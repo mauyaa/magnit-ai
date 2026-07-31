@@ -31,11 +31,17 @@ async def _widget(db, owner, **overrides) -> Widget:
 class TestSubmitLeadService:
     async def test_records_lead_and_increments_count(self, db, user):
         widget = await _widget(db, user)
-        lead = await submit_lead(db, widget_id=str(widget.id), email="a@example.com", name="A")
+        lead, captured_by = await submit_lead(
+            db, widget_id=str(widget.id), email="a@example.com", name="A"
+        )
         await db.commit()
         await db.refresh(widget)
 
         assert lead.email == "a@example.com"
+        # The widget comes back with the lead: the caller needs it to work out
+        # where this lead has to be delivered, and re-reading it would be a
+        # second query for a row already in hand.
+        assert captured_by.id == widget.id
         assert widget.leads_count == 1
 
     async def test_unknown_widget_raises(self, db):

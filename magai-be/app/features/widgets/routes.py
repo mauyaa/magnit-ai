@@ -4,11 +4,13 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from google.antigravity.types import AntigravityExecutionError
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,8 @@ from app.features.billing.deps import CurrentEntitlements, upgrade_required
 from app.features.billing.entitlements import (
     FeatureLocked,
     QuotaExceeded,
+    effective_lead_cap,
+    plan_lead_limit,
     record_usage,
     resolve_entitlements,
 )
@@ -41,12 +45,14 @@ from app.features.widgets.schemas import (
     FunnelResponse,
     GuestConceptsResponse,
     HealEventResponse,
+    ImpressionRequest,
     LaunchSetupRequest,
     LaunchSetupResponse,
     OutcomeConfigResponse,
     PortfolioAnalyticsResponse,
     ReadinessCheckResponse,
     ReadinessResponse,
+    ResumeBuildResponse,
     RuntimeConfigResponse,
     SiteReadResponse,
     ToolTypeListResponse,
@@ -59,11 +65,13 @@ from app.features.widgets.schemas import (
 )
 from app.features.widgets.service import (
     InvalidGuestConceptSession,
+    RollbackUnavailable,
     WidgetBuildMissing,
     WidgetNotFound,
     account_can_build,
     analyze_guest_url,
     analyze_url,
+    architect_from_widget,
     claim_guest_concepts,
     configure_widget_launch,
     create_guest_concept_token,
@@ -74,6 +82,7 @@ from app.features.widgets.service import (
     list_deployments,
     list_heal_events,
     list_user_widgets,
+    persist_architect,
     portfolio_analytics,
     put_decision_spec,
     read_guest_concept_token,
@@ -87,6 +96,10 @@ from app.features.widgets.service import (
 )
 from app.platform.config.settings import settings
 from app.platform.db.session import async_session_factory, get_async_session
+from app.platform.observability.metrics import (
+    first_value_duration_seconds,
+    product_activation_events_total,
+)
 from app.platform.pipeline.catalog import CATALOG, blueprint_for
 from app.platform.pipeline.engine import run_architect_stage
 from app.platform.pipeline.events import events as pipeline_events
@@ -213,7 +226,16 @@ def _conversion_rate(w: Widget) -> float | None:
     return round(w.leads_count / w.impressions_count * 100, 1)
 
 
-def _widget_to_response(w: Widget, *, can_build: bool | None = None) -> WidgetStatusResponse:
+def _widget_to_response(
+    w: Widget, *, can_build: bool | None = None, plan_leads: int = 0
+) -> WidgetStatusResponse:
+    """One tool, as the owner's workspace sees it.
+
+    ``plan_leads`` is the subscription's per-tool lead allowance, resolved once
+    per request by the caller. It is passed in rather than read here so a list of
+    twenty tools does not become twenty subscription lookups — and so the number
+    the dashboard shows is the same one lead capture actually enforces.
+    """
     return WidgetStatusResponse(
         id=str(w.id),
         title=w.title,
@@ -221,6 +243,7 @@ def _widget_to_response(w: Widget, *, can_build: bool | None = None) -> WidgetSt
         status=w.status,
         target_url=w.target_url,
         deployment_url=w.deployment_url,
+        embed_url=w.embed_url,
         embed_code=w.embed_code,
         leads_count=w.leads_count,
         impressions_count=w.impressions_count,
@@ -229,7 +252,7 @@ def _widget_to_response(w: Widget, *, can_build: bool | None = None) -> WidgetSt
         cta_clicks_count=w.cta_clicks_count,
         conversion_rate=_conversion_rate(w),
         plan_tier=w.plan_tier,
-        lead_cap=w.lead_cap,
+        lead_cap=effective_lead_cap(w.lead_cap, plan_leads),
         entitlement_status=w.entitlement_status,
         can_build=widget_can_build(w) if can_build is None else can_build,
         launch_settings=w.launch_settings,
@@ -270,6 +293,22 @@ def _deployment_to_response(d: WidgetDeployment) -> DeploymentResponse:
         is_current=d.is_current,
         created_at=d.created_at.isoformat(),
     )
+
+
+def _stored_blueprints(widget: Widget) -> list[Blueprint]:
+    """The directions we produced for this site, skipping any we can no longer read.
+
+    Lenient on purpose: this is used to put a customer back where they were, and
+    one unparseable entry should cost them that entry, not the whole draft and
+    the site read that produced it.
+    """
+    parsed: list[Blueprint] = []
+    for data in widget.blueprints or []:
+        try:
+            parsed.append(Blueprint(**data))
+        except (ValidationError, TypeError):
+            logger.warning("Widget %s has an unreadable blueprint", widget.id)
+    return parsed
 
 
 def _blueprint_at(widget: Widget, index: int) -> tuple[dict, Blueprint]:
@@ -318,14 +357,23 @@ def _enqueue_build(
     from app.platform.pipeline.tasks import build_widget_task
 
     try:
-        build_widget_task.delay(
-            widget_id=str(widget.id),
-            blueprint_dict=blueprint_data,
-            url=widget.target_url,
-            skip_deploy=skip_deploy,
-            architect_override_dict=architect_override,
-            source_evidence_dict=widget.source_evidence,
-            creation_brief_dict=widget.creation_brief,
+        # Build progress and completion are read from durable database state; the
+        # API never consumes this task's AsyncResult. Publishing without a result
+        # keeps a dead result backend from holding the request open through its
+        # retry loop. This request is also the retry boundary, so a dead broker
+        # becomes an immediate 503 rather than a minute-long loading state.
+        build_widget_task.apply_async(
+            kwargs={
+                "widget_id": str(widget.id),
+                "blueprint_dict": blueprint_data,
+                "url": widget.target_url,
+                "skip_deploy": skip_deploy,
+                "architect_override_dict": architect_override,
+                "source_evidence_dict": widget.source_evidence,
+                "creation_brief_dict": widget.creation_brief,
+            },
+            ignore_result=True,
+            retry=False,
         )
     except Exception:
         logger.exception("Failed to enqueue build for widget %s", widget.id)
@@ -333,6 +381,30 @@ def _enqueue_build(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="build_queue_unavailable",
         ) from None
+
+
+def _dispatch_build(
+    widget: Widget,
+    blueprint_data: dict,
+    skip_deploy: bool,
+    architect_override: dict | None,
+) -> None:
+    """Use the local runner in development and Celery everywhere else."""
+    if not settings.local_builds_enabled:
+        _enqueue_build(widget, blueprint_data, skip_deploy, architect_override)
+        return
+
+    from app.platform.pipeline.tasks import schedule_local_widget_build
+
+    schedule_local_widget_build(
+        str(widget.id),
+        blueprint_data,
+        widget.target_url,
+        publish=not skip_deploy,
+        architect_override_dict=architect_override,
+        source_evidence_dict=widget.source_evidence,
+        creation_brief_dict=widget.creation_brief,
+    )
 
 
 @router.post(
@@ -400,14 +472,20 @@ async def guest_concepts_endpoint(payload: AnalyzeRequest) -> GuestConceptsRespo
     Nothing is persisted before the visitor creates an account. A signed session
     token carries the trusted analysis across that account boundary.
     """
+    started = time.perf_counter()
+    product_activation_events_total.labels("first_look", "started").inc()
     try:
         brief = payload.brief or CreationBrief()
         target_url, analyzed, evidence = await analyze_guest_url(payload.url, brief)
     except (UnsafeTargetURL, EvidenceCollectionError) as exc:
+        product_activation_events_total.labels("first_look", "failed").inc()
+        first_value_duration_seconds.observe(time.perf_counter() - started)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from None
     except (AntigravityExecutionError, TimeoutError):
+        product_activation_events_total.labels("first_look", "failed").inc()
+        first_value_duration_seconds.observe(time.perf_counter() - started)
         logger.warning("First-look analysis provider unavailable", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -427,6 +505,8 @@ async def guest_concepts_endpoint(payload: AnalyzeRequest) -> GuestConceptsRespo
             used_types.add(tool.kind)
 
     if len(selected) != 2:
+        product_activation_events_total.labels("first_look", "failed").inc()
+        first_value_duration_seconds.observe(time.perf_counter() - started)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="concept_generation_incomplete"
         )
@@ -441,6 +521,8 @@ async def guest_concepts_endpoint(payload: AnalyzeRequest) -> GuestConceptsRespo
             )
         )
     except (AntigravityExecutionError, TimeoutError):
+        product_activation_events_total.labels("first_look", "failed").inc()
+        first_value_duration_seconds.observe(time.perf_counter() - started)
         logger.warning("First-look architecture provider unavailable", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -453,7 +535,7 @@ async def guest_concepts_endpoint(payload: AnalyzeRequest) -> GuestConceptsRespo
         evidence,
         brief,
     )
-    return GuestConceptsResponse(
+    response = GuestConceptsResponse(
         target_url=target_url,
         session_token=session_token,
         concepts=[
@@ -462,6 +544,9 @@ async def guest_concepts_endpoint(payload: AnalyzeRequest) -> GuestConceptsRespo
         ],
         brief=brief,
     )
+    product_activation_events_total.labels("first_look", "succeeded").inc()
+    first_value_duration_seconds.observe(time.perf_counter() - started)
+    return response
 
 
 @router.post("/claim-guest", response_model=ClaimGuestConceptResponse)
@@ -480,6 +565,14 @@ async def claim_guest_concept_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST, detail="guest_session_invalid"
         ) from None
 
+    # The signed session plus the direction chosen from it identifies this
+    # claim exactly. Replaying the request — a refresh, a second click, a
+    # timeout the browser could not tell from a failure — reaches the same
+    # tool instead of creating another one.
+    claim_key = hashlib.sha256(
+        f"{payload.session_token}:{payload.selected_index}".encode()
+    ).hexdigest()
+
     widget = await claim_guest_concepts(
         db,
         user.workspace_id,
@@ -489,7 +582,9 @@ async def claim_guest_concept_endpoint(
         payload.selected_index,
         evidence,
         brief,
+        claim_key=claim_key,
     )
+    product_activation_events_total.labels("concept_claim", "succeeded").inc()
     return ClaimGuestConceptResponse(
         widget_id=str(widget.id),
         blueprints=blueprints,
@@ -520,10 +615,75 @@ async def analyze_endpoint(
 @router.get("/portfolio/analytics", response_model=PortfolioAnalyticsResponse)
 async def portfolio_analytics_endpoint(
     user: CurrentUser,
+    entitlements: CurrentEntitlements,
     period_days: int = Query(default=30, ge=7, le=90),
     db: AsyncSession = Depends(get_async_session),
 ) -> PortfolioAnalyticsResponse:
+    """Portfolio analytics, clipped to the window the plan actually sells.
+
+    Every plan advertises a retention window and none of them enforced it, so
+    "90 days of history" was a line on the pricing page rather than a difference
+    a customer could feel. Clipped rather than refused: asking for more history
+    than the plan carries should return the history the plan carries, with the
+    window it used, not an error.
+    """
+    allowed = entitlements.plan.analytics_window_days
+    if settings.enforce_plan_limits and allowed > 0:
+        period_days = min(period_days, allowed)
     return await portfolio_analytics(db, user.workspace_id, period_days)
+
+
+@router.get("/{widget_id}/build-resume", response_model=ResumeBuildResponse)
+async def resume_build_endpoint(
+    widget_id: str,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_async_session),
+) -> ResumeBuildResponse:
+    """Restore a draft without relying on one tab's session storage.
+
+    Answers for both places a customer stops. If they chose a direction, that
+    concept comes back whole. If they only got as far as analysing the site,
+    the blueprints come back and ``concept`` is null — which is a resumable
+    state, not a broken one. Treating it as broken is what made the dashboard
+    promote a draft as the next best action and then hand the customer an empty
+    form with their site analysis quietly thrown away.
+    """
+    try:
+        widget = await get_owned_widget(db, widget_id, user.workspace_id)
+    except WidgetNotFound:
+        raise _NOT_FOUND from None
+
+    try:
+        brief = CreationBrief.model_validate(widget.creation_brief or {})
+    except (ValidationError, TypeError):
+        brief = CreationBrief()
+
+    blueprints = _stored_blueprints(widget)
+
+    concept: CuratedConcept | None = None
+    try:
+        _, blueprint = _chosen_blueprint(widget, 0, WidgetType(widget.widget_type))
+        concept = CuratedConcept(blueprint=blueprint, architect=architect_from_widget(widget))
+    except (ValueError, ValidationError, TypeError):
+        # No direction chosen yet, or a design we can no longer read. Either way
+        # the site read is still good and the customer can choose from it.
+        logger.info("Widget %s resumes at the choice, not at a concept", widget.id)
+
+    if concept is None and not blueprints:
+        # Nothing survived: no chosen design and no directions to offer. This is
+        # the only genuinely unresumable draft, and it is worth saying so rather
+        # than pretending the customer never started.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="widget_resume_unavailable",
+        )
+
+    return ResumeBuildResponse(
+        target_url=widget.target_url,
+        concept=concept,
+        blueprints=blueprints,
+        brief=brief,
+    )
 
 
 @router.get("/{widget_id}/tool-types", response_model=ToolTypeListResponse)
@@ -625,11 +785,20 @@ async def build_endpoint(
         widget, payload.blueprint_index, payload.widget_type
     )
 
-    _enqueue_build(
+    override = payload.architect_override
+    if override is not None:
+        # Written before the build is enqueued, not after it succeeds. The
+        # customer's edits lived in one tab's session storage, which the client
+        # cleared as soon as the build started — so a failed build discarded
+        # every change they had made and the resume screen rebuilt the version
+        # from before they touched it.
+        await persist_architect(db, widget, override)
+
+    _dispatch_build(
         widget,
         blueprint_data,
         payload.skip_deploy,
-        payload.architect_override.model_dump(mode="json") if payload.architect_override else None,
+        override.model_dump(mode="json") if override else None,
     )
     await _meter_build(db, widget, "build")
 
@@ -639,6 +808,7 @@ async def build_endpoint(
     widget.build_stage = "queued"
     widget.build_progress = 0.0
     widget.build_error = None
+    product_activation_events_total.labels("build", "started").inc()
 
     return BuildResponse(widget_id=str(widget.id), iframe_url="", status="building", embed_code="")
 
@@ -659,7 +829,21 @@ async def retry_build_endpoint(
     await _require_build_allowance(db, widget)
 
     blueprint_data, _ = _blueprint_at(widget, 0)
-    _enqueue_build(widget, blueprint_data, skip_deploy=False, architect_override=None)
+    # Retry the design that was approved, not the one the model first proposed.
+    # Passing None here meant pressing "Try again" on a failed build quietly
+    # reverted every edit the customer had made to it.
+    try:
+        approved = architect_from_widget(widget)
+    except (ValueError, ValidationError, TypeError):
+        logger.warning("Widget %s has no reusable design; retrying from its blueprint", widget.id)
+        approved = None
+
+    _dispatch_build(
+        widget,
+        blueprint_data,
+        skip_deploy=False,
+        architect_override=approved.model_dump(mode="json") if approved else None,
+    )
     await _meter_build(db, widget, "retry")
 
     widget.status = "building"
@@ -676,8 +860,12 @@ async def list_widgets(
     db: AsyncSession = Depends(get_async_session),
 ) -> WidgetListResponse:
     widgets = await list_user_widgets(db, user.workspace_id)
+    plan_leads = await plan_lead_limit(db, user.workspace_id)
     return WidgetListResponse(
-        widgets=[_widget_to_response(w, can_build=await account_can_build(db, w)) for w in widgets]
+        widgets=[
+            _widget_to_response(w, can_build=await account_can_build(db, w), plan_leads=plan_leads)
+            for w in widgets
+        ]
     )
 
 
@@ -716,7 +904,7 @@ async def rollback_endpoint(
     user: CurrentUser,
     db: AsyncSession = Depends(get_async_session),
 ) -> BuildResponse:
-    """Repoint the embed at the previous deployment. Instant; no rebuild."""
+    """Serve the previous build from the tool's permanent address. No rebuild."""
     try:
         widget = await rollback_widget(db, widget_id, user.workspace_id)
     except WidgetNotFound:
@@ -724,6 +912,13 @@ async def rollback_endpoint(
     except WidgetBuildMissing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="no_previous_deployment"
+        ) from None
+    except RollbackUnavailable:
+        # The customer came here because something is wrong on their website.
+        # Reporting success while that page keeps serving the broken build would
+        # be the worst possible moment to be inaccurate.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="rollback_unavailable"
         ) from None
 
     return BuildResponse(
@@ -744,7 +939,11 @@ async def get_widget_status(
         widget = await get_owned_widget(db, widget_id, user.workspace_id)
     except WidgetNotFound:
         raise _NOT_FOUND from None
-    return _widget_to_response(widget, can_build=await account_can_build(db, widget))
+    return _widget_to_response(
+        widget,
+        can_build=await account_can_build(db, widget),
+        plan_leads=await plan_lead_limit(db, user.workspace_id),
+    )
 
 
 @router.get("/{widget_id}/heal-events", response_model=list[HealEventResponse])
@@ -781,6 +980,7 @@ async def get_deployments(
 )
 async def record_impression_endpoint(
     widget_id: str,
+    payload: ImpressionRequest | None = None,
     db: AsyncSession = Depends(get_async_session),
 ) -> Response:
     """Public: a deployed widget reporting that it was viewed.
@@ -788,8 +988,12 @@ async def record_impression_endpoint(
     Unauthenticated by necessity — the visitor has no account. Returns 204 whether
     or not the widget exists, so this cannot be used to enumerate widget ids, and
     responds with no body because the caller is fire-and-forget.
+
+    The body is optional so a widget built before it existed keeps working; what
+    it carries is the host page's address, which is how a passive embed proves
+    it is installed and how our own preview screens stay out of the numbers.
     """
-    await record_impression(db, widget_id)
+    await record_impression(db, widget_id, payload.source_url if payload else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -998,7 +1202,8 @@ async def runtime_config_endpoint(
         outcomes=outcomes,
         consent_text=widget.consent_text or outcomes.email_capture.consent_text or None,
         cta_url=str(launch.get("cta_url") or outcomes.cta.url or "") or None,
-        accepting_leads=widget.leads_count < widget.lead_cap,
+        accepting_leads=widget.leads_count
+        < effective_lead_cap(widget.lead_cap, await plan_lead_limit(db, widget.user_id)),
     )
 
 
@@ -1007,8 +1212,18 @@ async def configure_widget_launch_endpoint(
     widget_id: str,
     payload: LaunchSetupRequest,
     user: CurrentUser,
+    entitlements: CurrentEntitlements,
     db: AsyncSession = Depends(get_async_session),
 ) -> LaunchSetupResponse:
+    # Everything else on this screen — placement, CTA, consent, which fields to
+    # ask for — belongs to any published tool. Forwarding leads to another system
+    # is the part the plans sell, and it was the one thing here nobody checked.
+    if payload.delivery_webhook_url:
+        try:
+            entitlements.require(Feature.WEBHOOK_DELIVERY)
+        except FeatureLocked as exc:
+            raise upgrade_required(exc) from None
+
     try:
         widget, new_secret = await configure_widget_launch(
             db, widget_id, user.workspace_id, payload

@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.features.integrations.models import Integration, IntegrationDelivery
@@ -24,7 +24,6 @@ from app.features.integrations.providers import (
 from app.features.leads.models import Lead
 from app.features.widgets.models import Widget
 from app.platform.config.settings import settings
-from app.platform.db.session import async_session_factory
 from app.platform.security.secrets import (
     SecretDecryptionError,
     decrypt_secret,
@@ -265,115 +264,97 @@ def integration_covers(integration: Integration, widget_id: uuid.UUID) -> bool:
     return str(widget_id) in {str(item) for item in integration.widget_ids}
 
 
-async def fan_out_lead(
+async def deliver_lead_to_integration(
+    db: AsyncSession,
+    *,
     lead_id: uuid.UUID,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
-) -> int:
-    """Deliver one captured lead to every connection that covers its tool.
+    integration_id: uuid.UUID,
+    # The outbox row's id, carried so a provider that supports idempotency keys
+    # can be given one. Unused by the providers that do not.
+    delivery_id: uuid.UUID | None = None,
+) -> tuple[bool, str | None]:
+    """One lead, one connection, one attempt — inside the outbox's transaction.
 
-    Runs as a background task after the visitor's response has been sent, and
-    opens its own session for the same reason the email notifier does: the
-    request-scoped session is closed by then, and reading the lead in a fresh
-    transaction guarantees we never deliver a row that was rolled back.
-
-    Never raises. A visitor filling in a calculator on someone's website must not
-    see an error because a CRM is down; the failure is recorded and surfaced on
-    the connection instead.
+    Split out of ``fan_out_lead`` because the fan-out could only ever try once.
+    A connection that failed was marked ``error`` and then excluded from the
+    query on every subsequent lead, so a single bad afternoon at a CRM meant a
+    business quietly stopped receiving leads there until someone happened to
+    look at the integrations page. Here the outbox owns the retries and this
+    function only reports what happened.
     """
-    factory = session_factory or async_session_factory
-    delivered = 0
+    row = (
+        await db.execute(
+            select(Lead, Widget).join(Widget, Lead.widget_id == Widget.id).where(Lead.id == lead_id)
+        )
+    ).first()
+    if row is None:
+        return False, "the lead no longer exists"
+    lead, widget = row
+
+    integration = await db.scalar(select(Integration).where(Integration.id == integration_id))
+    if integration is None or integration.status == "disconnected":
+        return False, "the connection was removed"
+
+    provider = CATALOG_BY_ID.get(integration.provider)
+    if provider is None:
+        return False, f"unknown provider {integration.provider}"
+
+    payload = LeadPayload(
+        email=lead.email,
+        name=lead.name,
+        score=lead.score,
+        answers=lead.answers or {},
+        result_title=(
+            str((lead.extra_meta or {}).get("result_key"))
+            if (lead.extra_meta or {}).get("result_key")
+            else None
+        ),
+        widget_title=widget.title,
+        widget_id=str(widget.id),
+        lead_id=str(lead.id),
+        created_at=lead.created_at.isoformat(),
+    )
+
     try:
-        async with factory() as db:
-            row = (
-                await db.execute(
-                    select(Lead, Widget)
-                    .join(Widget, Lead.widget_id == Widget.id)
-                    .where(Lead.id == lead_id)
-                )
-            ).first()
-            if row is None:
-                return 0
-            lead, widget = row
+        result = await deliver(
+            provider,
+            payload,
+            credential=_credential_for(integration),
+            config=integration.config,
+            endpoint_url=integration.endpoint_url,
+            signing_secret=_signing_secret(integration),
+        )
+    except (ProviderError, UnsafeTargetURL) as exc:
+        result = DeliveryResult(False, None, str(exc))
 
-            integrations = list(
-                (
-                    await db.execute(
-                        select(Integration).where(
-                            Integration.user_id == widget.user_id,
-                            Integration.status == "connected",
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            targets = [i for i in integrations if integration_covers(i, widget.id)]
-            if not targets:
-                return 0
+    if result.ok:
+        integration.delivered_count += 1
+        integration.last_error = None
+        # Recovered. Without this the connection stays flagged broken forever,
+        # long after whatever broke it was fixed.
+        if integration.status == "error":
+            integration.status = "connected"
+        lead.forwarded = True
+        lead.forwarded_at = datetime.now(UTC)
+    else:
+        integration.failed_count += 1
+        integration.last_error = (result.error or "delivery failed")[:500]
+        integration.status = "error"
+    integration.last_status_code = result.status_code
 
-            payload = LeadPayload(
-                email=lead.email,
-                name=lead.name,
-                score=lead.score,
-                answers=lead.answers or {},
-                result_title=(
-                    str((lead.extra_meta or {}).get("result_key"))
-                    if (lead.extra_meta or {}).get("result_key")
-                    else None
-                ),
-                widget_title=widget.title,
-                widget_id=str(widget.id),
-                lead_id=str(lead.id),
-                created_at=lead.created_at.isoformat(),
-            )
-
-            for integration in targets:
-                provider = CATALOG_BY_ID.get(integration.provider)
-                if provider is None:
-                    continue
-                try:
-                    credential = _credential_for(integration)
-                    result = await deliver(
-                        provider,
-                        payload,
-                        credential=credential,
-                        config=integration.config,
-                        endpoint_url=integration.endpoint_url,
-                        signing_secret=_signing_secret(integration),
-                    )
-                except (ProviderError, UnsafeTargetURL) as exc:
-                    result = DeliveryResult(False, None, str(exc))
-
-                if result.ok:
-                    delivered += 1
-                    integration.delivered_count += 1
-                    integration.last_error = None
-                    if integration.status == "error":
-                        integration.status = "connected"
-                else:
-                    integration.failed_count += 1
-                    integration.last_error = (result.error or "delivery failed")[:500]
-                    integration.status = "error"
-                integration.last_status_code = result.status_code
-
-                db.add(
-                    IntegrationDelivery(
-                        integration_id=integration.id,
-                        lead_id=lead.id,
-                        status="delivered" if result.ok else "failed",
-                        status_code=result.status_code,
-                        error=None if result.ok else integration.last_error,
-                    )
-                )
-
-            if delivered:
-                lead.forwarded = True
-                lead.forwarded_at = datetime.now(UTC)
-            await db.commit()
-    except Exception:
-        logger.exception("Could not fan out lead %s to integrations", lead_id)
-        return delivered
-    return delivered
+    # One audit row per attempt, with its own id: the outbox row is the delivery,
+    # this is the history of trying, and collapsing them would hide the retries
+    # that are the whole point of having an outbox.
+    db.add(
+        IntegrationDelivery(
+            integration_id=integration.id,
+            lead_id=lead.id,
+            status="delivered" if result.ok else "failed",
+            status_code=result.status_code,
+            error=None if result.ok else integration.last_error,
+        )
+    )
+    return result.ok, None if result.ok else integration.last_error
 
 
 async def deliveries_for_lead(db: AsyncSession, lead_id: uuid.UUID) -> list[IntegrationDelivery]:
