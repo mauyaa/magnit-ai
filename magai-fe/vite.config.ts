@@ -15,7 +15,8 @@ export default defineConfig({
     router: { routeFileIgnorePattern: "\\.(test|spec)\\.[jt]sx?$" },
   },
   nitro: {
-    preset: "vercel",
+    // Vercel by default; the Docker image builds a standalone Node server.
+    preset: process.env.NITRO_PRESET ?? "vercel",
   },
   vite: {
     server: { port: 5173 },

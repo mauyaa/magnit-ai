@@ -20,6 +20,8 @@ COPY . .
 
 ARG VITE_API_URL=http://localhost:8000
 ENV VITE_API_URL=$VITE_API_URL
+# The default preset targets Vercel; this image runs Nitro's Node server.
+ENV NITRO_PRESET=node-server
 RUN pnpm build
 
 
