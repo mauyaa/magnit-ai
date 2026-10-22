@@ -81,8 +81,12 @@ jobs:
         run: |
           # Deliberately narrow patterns for the providers this project uses, so
           # the check stays actionable rather than noisy.
-          if git grep -nIE '(sk_live_[0-9a-zA-Z]{20,}|whsec_[0-9a-zA-Z]{20,}|AIza[0-9A-Za-z_-]{30,})' \
-               $(git rev-list --all) -- . ':!*.example' ':!**/SECURITY.md' 2>/dev/null | head -20; then
+          # Capture matches first: piping straight into `head` makes the `if`
+          # test head's exit status, which is always 0.
+          matches=$(git grep -nIE '(sk_live_[0-9a-zA-Z]{20,}|whsec_[0-9a-zA-Z]{20,}|AIza[0-9A-Za-z_-]{30,})' \
+                      $(git rev-list --all) -- . ':!*.example' ':!**/SECURITY.md' 2>/dev/null || true)
+          if [ -n "$matches" ]; then
+            printf '%s\n' "$matches" | head -20
             echo "::error::A live-looking API key appears in git history. Rotate it immediately."
             exit 1
           fi
